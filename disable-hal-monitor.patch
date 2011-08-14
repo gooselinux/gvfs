@@ -1,0 +1,15 @@
+diff -up gvfs-1.4.3/monitor/Makefile.am.bak gvfs-1.4.3/monitor/Makefile.am
+--- gvfs-1.4.3/monitor/Makefile.am.bak	2010-01-13 16:51:15.000000000 +0100
++++ gvfs-1.4.3/monitor/Makefile.am	2010-01-13 17:29:08.000000000 +0100
+@@ -1,10 +1,6 @@
+-DIST_SUBDIRS = proxy hal gdu gphoto2 afc
++DIST_SUBDIRS = proxy gdu gphoto2 afc
+ SUBDIRS = proxy
+ 
+-if USE_HAL
+-SUBDIRS += hal
+-endif
+-
+ if USE_GDU
+ SUBDIRS += gdu
+ endif

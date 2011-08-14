@@ -1,0 +1,38 @@
+From 92c179d6ce2682595e7ce1a77e301ffc49e25526 Mon Sep 17 00:00:00 2001
+From: Bastien Nocera <hadess@hadess.net>
+Date: Fri, 06 Nov 2009 00:49:17 +0000
+Subject: [afc] Add x-content types for AFC backend
+
+https://bugzilla.gnome.org/show_bug.cgi?id=597805
+---
+diff --git a/daemon/gvfsbackendafc.c b/daemon/gvfsbackendafc.c
+index aa90a41..0c34e8b 100644
+--- a/daemon/gvfsbackendafc.c
++++ b/daemon/gvfsbackendafc.c
+@@ -255,6 +255,9 @@ g_vfs_backend_afc_mount (GVfsBackend *backend,
+   int retries;
+   iphone_error_t err;
+   lockdownd_client_t lockdown_cli = NULL;
++  char *camera_x_content_types[] = { "x-content/audio-player", "x-content/image-dcf", NULL};
++  char *media_player_x_content_types[] = {"x-content/audio-player", NULL};
++  char **dcim_afcinfo;
+ 
+   self = G_VFS_BACKEND_AFC(backend);
+   self->connected = FALSE;
+@@ -384,6 +387,14 @@ g_vfs_backend_afc_mount (GVfsBackend *backend,
+   /* lockdown connection is not needed anymore */
+   lockdownd_client_free (lockdown_cli);
+ 
++  /* Add camera item if necessary */
++  dcim_afcinfo = NULL;
++  if (afc_get_file_info (self->afc_cli, "/DCIM", &dcim_afcinfo) == AFC_E_SUCCESS)
++    g_vfs_backend_set_x_content_types (backend, camera_x_content_types);
++  else
++    g_vfs_backend_set_x_content_types (backend, media_player_x_content_types);
++  g_strfreev (dcim_afcinfo);
++
+   self->connected = TRUE;
+   g_vfs_job_succeeded (G_VFS_JOB(job));
+   return;
+--
+cgit v0.8.3.1

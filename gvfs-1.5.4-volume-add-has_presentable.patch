@@ -1,0 +1,44 @@
+From 2509eee2d63664d91b5f4152c42252b8e3ae2b63 Mon Sep 17 00:00:00 2001
+From: David Zeuthen <davidz@redhat.com>
+Date: Fri, 19 Feb 2010 12:01:52 -0500
+Subject: [PATCH 064/100] Add has_presentable() method to GGduVolume
+
+Signed-off-by: David Zeuthen <davidz@redhat.com>
+---
+ monitor/gdu/ggduvolume.c |    9 +++++++++
+ monitor/gdu/ggduvolume.h |    2 ++
+ 2 files changed, 11 insertions(+), 0 deletions(-)
+
+diff --git a/monitor/gdu/ggduvolume.c b/monitor/gdu/ggduvolume.c
+index 23f5060..1633c0d 100644
+--- a/monitor/gdu/ggduvolume.c
++++ b/monitor/gdu/ggduvolume.c
+@@ -1851,3 +1851,12 @@ g_gdu_volume_get_unix_mount_point (GGduVolume *volume)
+ {
+   return volume->unix_mount_point;
+ }
++
++gboolean
++g_gdu_volume_has_presentable (GGduVolume       *volume,
++                              GduPresentable  *presentable)
++{
++  return volume->gdu_volume != NULL &&
++    g_strcmp0 (gdu_presentable_get_id (GDU_PRESENTABLE (volume->gdu_volume)),
++               gdu_presentable_get_id (presentable)) == 0;
++}
+diff --git a/monitor/gdu/ggduvolume.h b/monitor/gdu/ggduvolume.h
+index 007484a..4c24b12 100644
+--- a/monitor/gdu/ggduvolume.h
++++ b/monitor/gdu/ggduvolume.h
+@@ -73,6 +73,8 @@ gboolean   g_gdu_volume_has_device_file (GGduVolume      *volume,
+                                          const gchar     *device_file);
+ gboolean   g_gdu_volume_has_dev         (GGduVolume       *volume,
+                                          dev_t             dev);
++gboolean   g_gdu_volume_has_presentable (GGduVolume       *volume,
++                                         GduPresentable   *presentable);
+ 
+ GduPresentable *g_gdu_volume_get_presentable (GGduVolume *volume);
+ 
+-- 
+1.7.0.1
+

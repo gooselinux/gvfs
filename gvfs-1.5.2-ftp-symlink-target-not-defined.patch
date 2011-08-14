@@ -1,0 +1,47 @@
+From d3f5454a53127b5c73738e394db461070c81942f Mon Sep 17 00:00:00 2001
+From: Benjamin Otte <otte@redhat.com>
+Date: Sun, 07 Feb 2010 17:11:50 +0000
+Subject: ftp: Handle cases where symlink target is not defined
+
+This can happen when systems emulate ls -l output but fail.
+Surprisingly, ProFtpd seems to be one of these.
+
+https://bugzilla.gnome.org/show_bug.cgi?id=608621
+---
+diff --git a/daemon/gvfsftpdircache.c b/daemon/gvfsftpdircache.c
+index dffebbc..8ae963a 100644
+--- a/daemon/gvfsftpdircache.c
++++ b/daemon/gvfsftpdircache.c
+@@ -241,6 +241,7 @@ g_vfs_ftp_dir_cache_resolve_symlink (GVfsFtpDirCache *  cache,
+   GFileInfo *info, *result;
+   GVfsFtpFile *tmp, *link;
+   guint i, lookups = 0;
++  const char *target;
+ 
+   if (!g_file_info_get_is_symlink (original) ||
+       g_vfs_ftp_task_is_in_error (task))
+@@ -248,10 +249,18 @@ g_vfs_ftp_dir_cache_resolve_symlink (GVfsFtpDirCache *  cache,
+ 
+   info = g_object_ref (original);
+   link = g_vfs_ftp_file_copy (file);
+-  do
+-    {
+-      /* This must not happen, as we use one of our own GFileInfos */
+-      g_assert (g_file_info_get_symlink_target (info) != NULL);
++  do {
++      target = g_file_info_get_symlink_target (info);
++      if (target == NULL)
++        {
++          /* This happens when bad servers don't report a symlink target.
++           * We now want to figure out if this is a directory or regular file,
++           * so we can at least report something useful.
++           */
++          g_object_unref (info);
++          info = cache->funcs->lookup_uncached (task, file);
++          break;
++        }
+       tmp = link;
+       link = cache->funcs->resolve_symlink (task, tmp, g_file_info_get_symlink_target (info));
+       g_vfs_ftp_file_free (tmp);
+--
+cgit v0.8.3.1

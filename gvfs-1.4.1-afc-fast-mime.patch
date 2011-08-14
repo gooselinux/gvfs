@@ -1,0 +1,24 @@
+From 4685f9e982f4c6884a21a0bd80d512a4ea0162db Mon Sep 17 00:00:00 2001
+From: Christian Kellner <gicmo@gnome.org>
+Date: Fri, 09 Oct 2009 10:48:24 +0000
+Subject: [AFC] Also set fast mime-type
+
+---
+diff --git a/daemon/gvfsbackendafc.c b/daemon/gvfsbackendafc.c
+index e4e1da0..29c1ed1 100644
+--- a/daemon/gvfsbackendafc.c
++++ b/daemon/gvfsbackendafc.c
+@@ -834,7 +834,10 @@ g_vfs_backend_afc_set_info_from_afcinfo (GVfsBackendAfc *self,
+         }
+ 
+       if (content_type)
+-        g_file_info_set_content_type (info, content_type);
++        {
++          g_file_info_set_content_type (info, content_type);
++          g_file_info_set_attribute_string (info, G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE, content_type);
++        }
+ 
+       if (icon == NULL)
+         icon = g_themed_icon_new ("text-x-generic");
+--
+cgit v0.8.3.1

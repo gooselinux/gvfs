@@ -1,0 +1,27 @@
+From d1947d28585fb6f69ad1899b48598e93115c69f9 Mon Sep 17 00:00:00 2001
+From: Bastien Nocera <hadess@hadess.net>
+Date: Thu, 07 Jan 2010 18:08:22 +0000
+Subject: [afc] Fix indentation
+
+---
+diff --git a/daemon/gvfsbackendafc.c b/daemon/gvfsbackendafc.c
+index 8722ca7..783ed86 100644
+--- a/daemon/gvfsbackendafc.c
++++ b/daemon/gvfsbackendafc.c
+@@ -765,10 +765,11 @@ g_vfs_backend_afc_set_info_from_afcinfo (GVfsBackendAfc *self,
+       if (g_str_equal (afcinfo[i], "st_size"))
+         {
+           g_file_info_set_size (info, atoll(afcinfo[i+1]));
+-        } else if (g_str_equal (afcinfo[i], "st_blocks"))
+-          {
++        }
++      else if (g_str_equal (afcinfo[i], "st_blocks"))
++        {
+             g_file_info_set_attribute_uint64 (info, G_FILE_ATTRIBUTE_UNIX_BLOCKS, atoi(afcinfo[i+1]));
+-          }
++        }
+       else if (g_str_equal (afcinfo[i], "st_ifmt"))
+         {
+           if (g_str_equal (afcinfo[i+1], "S_IFREG"))
+--
+cgit v0.8.3.1

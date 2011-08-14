@@ -1,0 +1,33 @@
+From 4113a6fd0e4b628a71a7144e4009012523945cc9 Mon Sep 17 00:00:00 2001
+From: Benjamin Otte <otte@redhat.com>
+Date: Sun, 07 Feb 2010 18:34:53 +0000
+Subject: ftp: Name the struct used for selecting the data connection method
+
+---
+diff --git a/daemon/gvfsftptask.c b/daemon/gvfsftptask.c
+index 4cabf14..fcf01ab 100644
+--- a/daemon/gvfsftptask.c
++++ b/daemon/gvfsftptask.c
+@@ -977,14 +977,16 @@ g_vfs_ftp_task_setup_data_connection_port (GVfsFtpTask *task, GVfsFtpMethod unus
+ }
+ 
+ typedef GVfsFtpMethod (* GVfsFtpOpenDataConnectionFunc) (GVfsFtpTask *task, GVfsFtpMethod method);
++typedef struct _GVfsFtpOpenDataConnectionMethod GVfsFtpOpenDataConnectionMethod;
++struct _GVfsFtpOpenDataConnectionMethod {
++    GVfsFtpFeature                required_feature;
++    GVfsFtpOpenDataConnectionFunc func;
++};
+ 
+ static GVfsFtpMethod
+ g_vfs_ftp_task_setup_data_connection_any (GVfsFtpTask *task, GVfsFtpMethod unused)
+ {
+-  static const struct {
+-    GVfsFtpFeature required_feature;
+-    GVfsFtpOpenDataConnectionFunc func;
+-  } funcs_ordered[] = {
++  static const GVfsFtpOpenDataConnectionMethod funcs_ordered[] = {
+     { G_VFS_FTP_FEATURE_EPSV, g_vfs_ftp_task_setup_data_connection_epsv },
+     { 0,                      g_vfs_ftp_task_setup_data_connection_pasv },
+     { G_VFS_FTP_FEATURE_EPRT, g_vfs_ftp_task_setup_data_connection_eprt },
+--
+cgit v0.8.3.1

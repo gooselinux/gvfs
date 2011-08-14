@@ -1,0 +1,26 @@
+From 9bc16c5eac225e42c414f732f61eed27a8866e99 Mon Sep 17 00:00:00 2001
+From: David Zeuthen <davidz@redhat.com>
+Date: Fri, 19 Feb 2010 11:58:46 -0500
+Subject: [PATCH 063/100] Use g_strcmp0 to compare strings, not ==
+
+Signed-off-by: David Zeuthen <davidz@redhat.com>
+---
+ monitor/gdu/ggdudrive.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/monitor/gdu/ggdudrive.c b/monitor/gdu/ggdudrive.c
+index 5fc88e2..80ac8e8 100644
+--- a/monitor/gdu/ggdudrive.c
++++ b/monitor/gdu/ggdudrive.c
+@@ -1217,7 +1217,7 @@ gboolean
+ g_gdu_drive_has_presentable (GGduDrive       *drive,
+                              GduPresentable  *presentable)
+ {
+-  return gdu_presentable_get_id (drive->presentable) == gdu_presentable_get_id (presentable);
++  return g_strcmp0 (gdu_presentable_get_id (drive->presentable), gdu_presentable_get_id (presentable)) == 0;
+ }
+ 
+ time_t
+-- 
+1.7.0.1
+

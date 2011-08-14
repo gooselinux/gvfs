@@ -1,0 +1,24 @@
+From 0b272cacaa0af2d448a34a88db31b0c56383c418 Mon Sep 17 00:00:00 2001
+From: Christian Kellner <gicmo@gnome.org>
+Date: Thu, 08 Oct 2009 21:27:58 +0000
+Subject: [afc] Bug 597800 - Should hide dot files
+
+---
+diff --git a/daemon/gvfsbackendafc.c b/daemon/gvfsbackendafc.c
+index 8c64b0d..e4e1da0 100644
+--- a/daemon/gvfsbackendafc.c
++++ b/daemon/gvfsbackendafc.c
+@@ -876,6 +876,11 @@ g_vfs_backend_afc_set_info_from_afcinfo (GVfsBackendAfc *self,
+     g_file_info_set_edit_name (info, display_name);
+ 
+   g_free (display_name);
++
++  /* mark dot files as hidden */
++  if (basename != NULL && basename[0] == '.')
++     g_file_info_set_is_hidden (info, TRUE);
++
+ }
+ 
+ /* Callback for iterating over a directory. */
+--
+cgit v0.8.3.1

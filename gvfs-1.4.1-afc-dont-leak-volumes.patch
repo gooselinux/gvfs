@@ -1,0 +1,20 @@
+From e08ea6cd747969ec548a3285e1ec55f26d78cf1e Mon Sep 17 00:00:00 2001
+From: Bastien Nocera <hadess@hadess.net>
+Date: Thu, 05 Nov 2009 23:28:19 +0000
+Subject: Avoid leaking volumes when removing them
+
+---
+diff --git a/monitor/afc/afcvolumemonitor.c b/monitor/afc/afcvolumemonitor.c
+index 76f4303..91b3e41 100644
+--- a/monitor/afc/afcvolumemonitor.c
++++ b/monitor/afc/afcvolumemonitor.c
+@@ -65,6 +65,7 @@ g_vfs_afc_monitor_remove_volume (GVfsAfcVolumeMonitor *self,
+       g_print ("removing volume for device uuid '%s'\n", uuid);
+       self->volumes = g_list_remove (self->volumes, volume);
+       g_signal_emit_by_name (self, "volume-removed", volume);
++      g_object_unref (volume);
+     }
+ }
+ 
+--
+cgit v0.8.3.1

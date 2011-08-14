@@ -1,0 +1,25 @@
+From 3590a1b9bac58bf95af25fa5348c2a34b1da6bd3 Mon Sep 17 00:00:00 2001
+From: Nikias Bassen <nikias@gmx.li>
+Date: Thu, 29 Oct 2009 11:22:15 +0000
+Subject: [afc] Add st_mtime support for OS 3.1
+
+Add mtime support in g_vfs_backend_afc_set_info_from_afcinfo,
+as supported by OS 3.1.
+---
+diff --git a/daemon/gvfsbackendafc.c b/daemon/gvfsbackendafc.c
+index 29c1ed1..8bdd2ec 100644
+--- a/daemon/gvfsbackendafc.c
++++ b/daemon/gvfsbackendafc.c
+@@ -797,6 +797,10 @@ g_vfs_backend_afc_set_info_from_afcinfo (GVfsBackendAfc *self,
+         {
+           g_file_info_set_attribute_uint32 (info, G_FILE_ATTRIBUTE_UNIX_NLINK, atoi(afcinfo[i+1]));
+         }
++      else if (g_str_equal (afcinfo[i], "st_mtime"))
++        {
++	  g_file_info_set_attribute_uint64 (info, G_FILE_ATTRIBUTE_TIME_MODIFIED, atoll(afcinfo[i+1]) / 1000000000);
++	}
+       else if (g_str_equal (afcinfo[i], "LinkTarget"))
+         {
+           linktarget = g_strdup (afcinfo[i+1]);
+--
+cgit v0.8.3.1

@@ -1,0 +1,36 @@
+From b1423ef4ae8883bc38a510fd606377a91fbe6201 Mon Sep 17 00:00:00 2001
+From: Benjamin Otte <otte@redhat.com>
+Date: Sun, 07 Feb 2010 19:01:06 +0000
+Subject: ftp: Prefer PASV/PORT to EPSV/EPRT for IPv4
+
+As PASV and PORT are older, there's a higher chance that they are
+supported. As only IPv4 connections can use these commands, IPv6 will
+still prefer EPSV/EPRT.
+
+The order of methods now looks like this (assuming EPSV and EPRT are
+supported):
+IPv4: PASV EPSV PORT EPRT
+IPv6: EPSV EPRT PASV
+Note that PASV for IPv6 will try the returned port and the known remote
+address since the IP is not reliable (That's the fallback part in IPv4).
+---
+diff --git a/daemon/gvfsftptask.c b/daemon/gvfsftptask.c
+index 3e37bf1..8c5f7fb 100644
+--- a/daemon/gvfsftptask.c
++++ b/daemon/gvfsftptask.c
+@@ -1027,10 +1027,10 @@ static GVfsFtpMethod
+ g_vfs_ftp_task_setup_data_connection_any (GVfsFtpTask *task, GVfsFtpMethod unused)
+ {
+   static const GVfsFtpOpenDataConnectionMethod funcs_ordered[] = {
+-    { G_VFS_FTP_FEATURE_EPSV, G_SOCKET_FAMILY_INVALID, g_vfs_ftp_task_setup_data_connection_epsv },
+     { 0,                      G_SOCKET_FAMILY_IPV4,    g_vfs_ftp_task_setup_data_connection_pasv },
+-    { G_VFS_FTP_FEATURE_EPRT, G_SOCKET_FAMILY_INVALID, g_vfs_ftp_task_setup_data_connection_eprt },
+-    { 0,                      G_SOCKET_FAMILY_IPV4,    g_vfs_ftp_task_setup_data_connection_port }
++    { G_VFS_FTP_FEATURE_EPSV, G_SOCKET_FAMILY_INVALID, g_vfs_ftp_task_setup_data_connection_epsv },
++    { 0,                      G_SOCKET_FAMILY_IPV4,    g_vfs_ftp_task_setup_data_connection_port },
++    { G_VFS_FTP_FEATURE_EPRT, G_SOCKET_FAMILY_INVALID, g_vfs_ftp_task_setup_data_connection_eprt }
+   };
+   GVfsFtpMethod method;
+   GSocketFamily family;
+--
+cgit v0.8.3.1

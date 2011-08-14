@@ -1,0 +1,77 @@
+From a496883e99676e30e56280b7a43551c796552d5f Mon Sep 17 00:00:00 2001
+From: Bastien Nocera <hadess@hadess.net>
+Date: Tue, 26 Jan 2010 14:30:56 +0000
+Subject: Update AFC backend and volume monitor for libiphone 0.9.6
+
+---
+diff --git a/configure.ac b/configure.ac
+index b3a96f3..b47f091 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -331,7 +331,7 @@ AFC_LIBS=
+ AFC_CFLAGS=
+ 
+ if test "x$enable_afc" != "xno" ; then
+-  PKG_CHECK_EXISTS(libiphone-1.0 >= 0.9.4, msg_afc=yes)
++  PKG_CHECK_EXISTS(libiphone-1.0 >= 0.9.6, msg_afc=yes)
+ 
+   if test "x$msg_afc" = "xyes"; then
+     PKG_CHECK_MODULES(AFC, libiphone-1.0)
+diff --git a/daemon/gvfsbackendafc.c b/daemon/gvfsbackendafc.c
+index 783ed86..2d42d15 100644
+--- a/daemon/gvfsbackendafc.c
++++ b/daemon/gvfsbackendafc.c
+@@ -249,7 +249,8 @@ g_vfs_backend_afc_mount (GVfsBackend *backend,
+   const char *str;
+   char *tmp;
+   char *display_name;
+-  int port, virtual_port;
++  guint16 port;
++  int virtual_port;
+   GMountSpec *real_spec;
+   GVfsBackendAfc *self;
+   int retries;
+@@ -330,8 +331,9 @@ g_vfs_backend_afc_mount (GVfsBackend *backend,
+ 
+   if (G_UNLIKELY(g_vfs_backend_iphone_check(err, G_VFS_JOB(job))))
+     goto out_destroy_service;
+-  if (G_UNLIKELY(g_vfs_backend_lockdownd_check (lockdownd_client_new (self->dev,
+-                                                                      &lockdown_cli),
++  if (G_UNLIKELY(g_vfs_backend_lockdownd_check (lockdownd_client_new_with_handshake (self->dev,
++                                                                                     &lockdown_cli,
++                                                                                     "gvfsd-afc"),
+                                                 G_VFS_JOB(job))))
+     {
+       goto out_destroy_dev;
+@@ -1305,7 +1307,6 @@ g_vfs_backend_afc_init (GVfsBackendAfc *self)
+     {
+       /* enable full debugging */
+       iphone_set_debug_level (1);
+-      iphone_set_debug_mask (DBGMASK_ALL);
+     }
+ }
+ 
+diff --git a/monitor/afc/afcvolume.c b/monitor/afc/afcvolume.c
+index 3af4661..a0413ec 100644
+--- a/monitor/afc/afcvolume.c
++++ b/monitor/afc/afcvolume.c
+@@ -77,7 +77,7 @@ _g_vfs_afc_volume_update_metadata (GVfsAfcVolume *self)
+   iphone_error_t err;
+   guint retries;
+   char *model, *display_name;
+-  int port;
++  guint16 port;
+ 
+   retries = 0;
+   do {
+@@ -90,7 +90,7 @@ _g_vfs_afc_volume_update_metadata (GVfsAfcVolume *self)
+   if (err != IPHONE_E_SUCCESS)
+     return 0;
+ 
+-  if (lockdownd_client_new (dev, &lockdown_cli) != LOCKDOWN_E_SUCCESS)
++  if (lockdownd_client_new_with_handshake (dev, &lockdown_cli, "gvfs-afc-volume-monitor") != LOCKDOWN_E_SUCCESS)
+     {
+       iphone_device_free (dev);
+       return 0;
+--
+cgit v0.8.3.1

@@ -1,0 +1,62 @@
+From dc24aa1c9702114d3a66218a366b2b4292f34352 Mon Sep 17 00:00:00 2001
+From: Nikias Bassen <nikias@gmx.li>
+Date: Sat, 31 Oct 2009 01:47:17 +0000
+Subject: Support for setting file modification times
+
+---
+diff --git a/daemon/gvfsbackendafc.c b/daemon/gvfsbackendafc.c
+index 131d683..48ee052 100644
+--- a/daemon/gvfsbackendafc.c
++++ b/daemon/gvfsbackendafc.c
+@@ -1075,6 +1075,41 @@ g_vfs_backend_afc_set_display_name (GVfsBackend *backend,
+ }
+ 
+ static void
++g_vfs_backend_afc_set_attribute (GVfsBackend *backend,
++				 GVfsJobSetAttribute *job,
++				 const char *filename,
++				 const char *attribute,
++				 GFileAttributeType type,
++				 gpointer value_p,
++				 GFileQueryInfoFlags flags)
++{
++  GVfsBackendAfc *self;
++  uint64_t mtime = 0;
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail(self->connected);
++
++  if (g_str_equal (attribute, G_FILE_ATTRIBUTE_TIME_MODIFIED) != FALSE)
++    {
++      g_vfs_job_failed (G_VFS_JOB (job),
++			G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
++			_("Operation unsupported"));
++      return;
++    }
++
++  mtime = *(guint64*)(value_p) * (guint64)1000000000;
++
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_set_file_time (self->afc_cli,
++                                                             filename, mtime),
++                                          G_VFS_JOB(job))))
++    {
++      return;
++    }
++
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++}
++
++static void
+ g_vfs_backend_afc_make_directory (GVfsBackend *backend,
+                                   GVfsJobMakeDirectory *job,
+                                   const char *path)
+@@ -1221,6 +1256,7 @@ g_vfs_backend_afc_class_init (GVfsBackendAfcClass *klass)
+   backend_class->make_symlink     = g_vfs_backend_afc_make_symlink;
+   backend_class->move             = g_vfs_backend_afc_move;
+   backend_class->set_display_name = g_vfs_backend_afc_set_display_name;
++  backend_class->set_attribute    = g_vfs_backend_afc_set_attribute;
+ }
+ 
+ /*
+--
+cgit v0.8.3.1

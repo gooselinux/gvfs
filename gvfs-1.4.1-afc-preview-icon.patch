@@ -1,0 +1,23 @@
+From cb5c88866e02ef50f0a22a7575e8b37f540978bf Mon Sep 17 00:00:00 2001
+From: Bastien Nocera <hadess@hadess.net>
+Date: Tue, 10 Nov 2009 13:33:21 +0000
+Subject: [afc] Only check for a preview icon if actually requested
+
+Should speed up enumeration slightly.
+---
+diff --git a/daemon/gvfsbackendafc.c b/daemon/gvfsbackendafc.c
+index 0c34e8b..8722ca7 100644
+--- a/daemon/gvfsbackendafc.c
++++ b/daemon/gvfsbackendafc.c
+@@ -904,7 +904,8 @@ g_vfs_backend_afc_set_info_from_afcinfo (GVfsBackendAfc *self,
+   g_file_info_set_is_hidden (info, hidden);
+ 
+   /* Check for matching thumbnail in .MISC directory */
+-  if (path != NULL &&
++  if (g_file_attribute_matcher_matches (matcher, G_FILE_ATTRIBUTE_PREVIEW_ICON) &&
++      path != NULL &&
+       g_str_has_prefix (path, "/DCIM/") &&
+       hidden == FALSE &&
+       basename != NULL &&
+--
+cgit v0.8.3.1

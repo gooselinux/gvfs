@@ -1,0 +1,22 @@
+From dc17f80f9f37fb9c6b9300f8e25184efcd30e8bf Mon Sep 17 00:00:00 2001
+From: Bastien Nocera <hadess@hadess.net>
+Date: Fri, 06 Nov 2009 02:44:04 +0000
+Subject: Fix mtime setting
+
+Thinko in mtime setting patch, spotted by Nikias.
+---
+diff --git a/daemon/gvfsbackendafc.c b/daemon/gvfsbackendafc.c
+index 1e0d788..43affa7 100644
+--- a/daemon/gvfsbackendafc.c
++++ b/daemon/gvfsbackendafc.c
+@@ -1090,7 +1090,7 @@ g_vfs_backend_afc_set_attribute (GVfsBackend *backend,
+   self = G_VFS_BACKEND_AFC(backend);
+   g_return_if_fail(self->connected);
+ 
+-  if (g_str_equal (attribute, G_FILE_ATTRIBUTE_TIME_MODIFIED) != FALSE)
++  if (g_str_equal (attribute, G_FILE_ATTRIBUTE_TIME_MODIFIED) == FALSE)
+     {
+       g_vfs_job_failed (G_VFS_JOB (job),
+ 			G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+--
+cgit v0.8.3.1

@@ -1,0 +1,287 @@
+From 3f3f130072c94e38d6f07ef37d425a1c86bddd29 Mon Sep 17 00:00:00 2001
+From: Nikias Bassen <nikias@gmx.li>
+Date: Sun, 31 Jan 2010 11:54:44 +0000
+Subject: Update AFC backend and volume monitor for libimobiledevice 0.9.7
+
+---
+diff --git a/configure.ac b/configure.ac
+index b47f091..f366d3a 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -331,10 +331,10 @@ AFC_LIBS=
+ AFC_CFLAGS=
+ 
+ if test "x$enable_afc" != "xno" ; then
+-  PKG_CHECK_EXISTS(libiphone-1.0 >= 0.9.6, msg_afc=yes)
++  PKG_CHECK_EXISTS(libimobiledevice-1.0 >= 0.9.7, msg_afc=yes)
+ 
+   if test "x$msg_afc" = "xyes"; then
+-    PKG_CHECK_MODULES(AFC, libiphone-1.0)
++    PKG_CHECK_MODULES(AFC, libimobiledevice-1.0)
+     AC_DEFINE(HAVE_AFC, 1, [Define to 1 if AFC is going to be built])
+   fi
+ fi
+diff --git a/daemon/gvfsbackendafc.c b/daemon/gvfsbackendafc.c
+index 2d42d15..c056718 100644
+--- a/daemon/gvfsbackendafc.c
++++ b/daemon/gvfsbackendafc.c
+@@ -16,9 +16,9 @@
+ #include <glib/gi18n.h>
+ #include <errno.h>
+ 
+-#include <libiphone/libiphone.h>
+-#include <libiphone/lockdown.h>
+-#include <libiphone/afc.h>
++#include <libimobiledevice/libimobiledevice.h>
++#include <libimobiledevice/lockdown.h>
++#include <libimobiledevice/afc.h>
+ 
+ #include "gvfsbackendafc.h"
+ #include "gvfsjobopenforread.h"
+@@ -46,7 +46,7 @@ struct _GVfsBackendAfc {
+   char *model;
+   gboolean connected;
+ 
+-  iphone_device_t dev;
++  idevice_t dev;
+   afc_client_t afc_cli;
+ };
+ 
+@@ -124,7 +124,7 @@ g_vfs_backend_afc_close_connection (GVfsBackendAfc *self)
+       afc_client_free (self->afc_cli);
+       g_free (self->model);
+       self->model = NULL;
+-      iphone_device_free (self->dev);
++      idevice_free (self->dev);
+     }
+   self->connected = FALSE;
+ }
+@@ -194,23 +194,23 @@ g_vfs_backend_lockdownd_check (lockdownd_error_t cond, GVfsJob *job)
+ }
+ 
+ static int
+-g_vfs_backend_iphone_check (iphone_error_t cond, GVfsJob *job)
++g_vfs_backend_idevice_check (idevice_error_t cond, GVfsJob *job)
+ {
+-  if (G_LIKELY(cond == IPHONE_E_SUCCESS))
++  if (G_LIKELY(cond == IDEVICE_E_SUCCESS))
+         return 0;
+ 
+   switch (cond)
+     {
+-    case IPHONE_E_INVALID_ARG:
++    case IDEVICE_E_INVALID_ARG:
+       g_vfs_job_failed (job, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+-                        _("iPhone Device Error: Invalid Argument"));
++                        _("libimobiledevice Error: Invalid Argument"));
+       break;
+-    case IPHONE_E_NO_DEVICE:
++    case IDEVICE_E_NO_DEVICE:
+       g_vfs_job_failed (job, G_IO_ERROR, G_IO_ERROR_FAILED,
+-                        _("iPhone Device Error: No device found. Make sure usbmuxd is set up correctly."));
++                        _("libimobiledevice Error: No device found. Make sure usbmuxd is set up correctly."));
+     default:
+       g_vfs_job_failed (job, G_IO_ERROR, G_IO_ERROR_FAILED,
+-                        _("Unhandled iPhone Device error (%d)"), cond);
++                        _("Unhandled libimobiledevice error (%d)"), cond);
+       break;
+     }
+ 
+@@ -218,12 +218,12 @@ g_vfs_backend_iphone_check (iphone_error_t cond, GVfsJob *job)
+ }
+ 
+ static void
+-_iphone_event_cb (const iphone_event_t *event, void *user_data)
++_idevice_event_cb (const idevice_event_t *event, void *user_data)
+ {
+   GVfsBackendAfc *afc_backend = G_VFS_BACKEND_AFC (user_data);
+ 
+   g_return_if_fail (afc_backend->uuid != NULL);
+-  if (event->event != IPHONE_DEVICE_REMOVE)
++  if (event->event != IDEVICE_DEVICE_REMOVE)
+     return;
+   if (g_str_equal (event->uuid, afc_backend->uuid) == FALSE)
+     return;
+@@ -232,7 +232,7 @@ _iphone_event_cb (const iphone_event_t *event, void *user_data)
+ 
+   g_vfs_backend_afc_close_connection (afc_backend);
+ 
+-  iphone_event_unsubscribe ();
++  idevice_event_unsubscribe ();
+ 
+   /* TODO: need a cleaner way to force unmount ourselves */
+   exit (1);
+@@ -254,7 +254,7 @@ g_vfs_backend_afc_mount (GVfsBackend *backend,
+   GMountSpec *real_spec;
+   GVfsBackendAfc *self;
+   int retries;
+-  iphone_error_t err;
++  idevice_error_t err;
+   lockdownd_client_t lockdown_cli = NULL;
+   char *camera_x_content_types[] = { "x-content/audio-player", "x-content/image-dcf", NULL};
+   char *media_player_x_content_types[] = {"x-content/audio-player", NULL};
+@@ -263,7 +263,7 @@ g_vfs_backend_afc_mount (GVfsBackend *backend,
+   self = G_VFS_BACKEND_AFC(backend);
+   self->connected = FALSE;
+ 
+-  iphone_event_subscribe (_iphone_event_cb, self);
++  idevice_event_subscribe (_idevice_event_cb, self);
+ 
+   /* setup afc */
+ 
+@@ -323,13 +323,13 @@ g_vfs_backend_afc_mount (GVfsBackend *backend,
+ 
+   retries = 0;
+   do {
+-      err = iphone_device_new(&self->dev, self->uuid);
+-      if (err == IPHONE_E_SUCCESS)
++      err = idevice_new(&self->dev, self->uuid);
++      if (err == IDEVICE_E_SUCCESS)
+           break;
+       g_usleep (G_USEC_PER_SEC);
+   } while (retries++ < 10);
+ 
+-  if (G_UNLIKELY(g_vfs_backend_iphone_check(err, G_VFS_JOB(job))))
++  if (G_UNLIKELY(g_vfs_backend_idevice_check(err, G_VFS_JOB(job))))
+     goto out_destroy_service;
+   if (G_UNLIKELY(g_vfs_backend_lockdownd_check (lockdownd_client_new_with_handshake (self->dev,
+                                                                                      &lockdown_cli,
+@@ -408,7 +408,7 @@ out_destroy_lockdown:
+   lockdownd_client_free (lockdown_cli);
+ 
+ out_destroy_dev:
+-  iphone_device_free (self->dev);
++  idevice_free (self->dev);
+ 
+ out_destroy_service:
+   g_free (self->service);
+@@ -1306,7 +1306,7 @@ g_vfs_backend_afc_init (GVfsBackendAfc *self)
+   if (g_getenv ("GVFS_DEBUG") != NULL)
+     {
+       /* enable full debugging */
+-      iphone_set_debug_level (1);
++      idevice_set_debug_level (1);
+     }
+ }
+ 
+diff --git a/monitor/afc/afcvolume.c b/monitor/afc/afcvolume.c
+index a0413ec..26da41f 100644
+--- a/monitor/afc/afcvolume.c
++++ b/monitor/afc/afcvolume.c
+@@ -9,9 +9,9 @@
+ #include <glib.h>
+ #include <gio/gio.h>
+ 
+-#include <libiphone/libiphone.h>
+-#include <libiphone/lockdown.h>
+-#include <libiphone/afc.h>
++#include <libimobiledevice/libimobiledevice.h>
++#include <libimobiledevice/lockdown.h>
++#include <libimobiledevice/afc.h>
+ 
+ #include "afcvolume.h"
+ 
+@@ -71,28 +71,28 @@ g_vfs_afc_volume_class_init (GVfsAfcVolumeClass *klass)
+ static int
+ _g_vfs_afc_volume_update_metadata (GVfsAfcVolume *self)
+ {
+-  iphone_device_t dev;
++  idevice_t dev;
+   afc_client_t afc_cli;
+   lockdownd_client_t lockdown_cli = NULL;
+-  iphone_error_t err;
++  idevice_error_t err;
+   guint retries;
+   char *model, *display_name;
+   guint16 port;
+ 
+   retries = 0;
+   do {
+-      err = iphone_device_new (&dev, self->uuid);
+-      if (err == IPHONE_E_SUCCESS)
++      err = idevice_new (&dev, self->uuid);
++      if (err == IDEVICE_E_SUCCESS)
+         break;
+       g_usleep (G_USEC_PER_SEC);
+   } while (retries++ < 10);
+ 
+-  if (err != IPHONE_E_SUCCESS)
++  if (err != IDEVICE_E_SUCCESS)
+     return 0;
+ 
+   if (lockdownd_client_new_with_handshake (dev, &lockdown_cli, "gvfs-afc-volume-monitor") != LOCKDOWN_E_SUCCESS)
+     {
+-      iphone_device_free (dev);
++      idevice_free (dev);
+       return 0;
+     }
+ 
+@@ -106,7 +106,7 @@ _g_vfs_afc_volume_update_metadata (GVfsAfcVolume *self)
+   if (lockdownd_start_service (lockdown_cli, DEFAULT_SERVICE, &port) != LOCKDOWN_E_SUCCESS)
+     {
+       lockdownd_client_free (lockdown_cli);
+-      iphone_device_free (dev);
++      idevice_free (dev);
+       return 0;
+     }
+ 
+@@ -127,7 +127,7 @@ _g_vfs_afc_volume_update_metadata (GVfsAfcVolume *self)
+     }
+ 
+   lockdownd_client_free (lockdown_cli);
+-  iphone_device_free (dev);
++  idevice_free (dev);
+ 
+   return 1;
+ }
+diff --git a/monitor/afc/afcvolumemonitor.c b/monitor/afc/afcvolumemonitor.c
+index 91b3e41..d10e862 100644
+--- a/monitor/afc/afcvolumemonitor.c
++++ b/monitor/afc/afcvolumemonitor.c
+@@ -10,7 +10,7 @@
+ #include <gvfsproxyvolumemonitordaemon.h>
+ #include <stdio.h>
+ #include <gio/gio.h>
+-#include <libiphone/libiphone.h>
++#include <libimobiledevice/libimobiledevice.h>
+ #include "afcvolume.h"
+ #include "afcvolumemonitor.h"
+ 
+@@ -70,7 +70,7 @@ g_vfs_afc_monitor_remove_volume (GVfsAfcVolumeMonitor *self,
+ }
+ 
+ static void
+-g_vfs_afc_monitor_iphone_event (const iphone_event_t *event, void *user_data)
++g_vfs_afc_monitor_idevice_event (const idevice_event_t *event, void *user_data)
+ {
+   GVfsAfcVolumeMonitor *self;
+ 
+@@ -78,7 +78,7 @@ g_vfs_afc_monitor_iphone_event (const iphone_event_t *event, void *user_data)
+ 
+   self = G_VFS_AFC_VOLUME_MONITOR(user_data);
+ 
+-  if (event->event == IPHONE_DEVICE_ADD)
++  if (event->event == IDEVICE_DEVICE_ADD)
+     g_vfs_afc_monitor_create_volume (self, event->uuid);
+   else
+     g_vfs_afc_monitor_remove_volume (self, event->uuid);
+@@ -95,7 +95,7 @@ g_vfs_afc_volume_monitor_constructor (GType type, guint ncps,
+ 
+   self->volumes = NULL;
+ 
+-  iphone_event_subscribe(g_vfs_afc_monitor_iphone_event, self);
++  idevice_event_subscribe(g_vfs_afc_monitor_idevice_event, self);
+ 
+   g_print ("Volume monitor alive\n");
+ 
+@@ -119,7 +119,7 @@ g_vfs_afc_volume_monitor_finalize (GObject *_self)
+   if (self->volumes)
+     list_free (self->volumes);
+ 
+-  iphone_event_unsubscribe();
++  idevice_event_unsubscribe();
+ 
+   if (G_OBJECT_CLASS(g_vfs_afc_volume_monitor_parent_class)->finalize)
+     (*G_OBJECT_CLASS(g_vfs_afc_volume_monitor_parent_class)->finalize)( G_OBJECT(self));
+--
+cgit v0.8.3.1

@@ -1,0 +1,28 @@
+From 28cac0d0e24e8e3f58ef82503b5acedd7fc5b096 Mon Sep 17 00:00:00 2001
+From: David Zeuthen <davidz@redhat.com>
+Date: Fri, 19 Feb 2010 11:57:03 -0500
+Subject: [PATCH 060/100] Update comment stating that it's fine to have a NULL GduDevice
+
+Signed-off-by: David Zeuthen <davidz@redhat.com>
+---
+ monitor/gdu/ggdudrive.c |    4 +++-
+ 1 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/monitor/gdu/ggdudrive.c b/monitor/gdu/ggdudrive.c
+index 72126a0..4607223 100644
+--- a/monitor/gdu/ggdudrive.c
++++ b/monitor/gdu/ggdudrive.c
+@@ -169,7 +169,9 @@ update_drive (GGduDrive *drive)
+   else
+     drive->name = gdu_presentable_get_name (drive->presentable);
+ 
+-  /* the GduDevice for an activatable drive (such as RAID) is NULL if the drive is not activated */
++  /* It's perfectly fine to not have a GduDevice - for example, this is the case for non-running
++   * MD RAID arrays as well as LVM2 Volume Group "drives"
++   */
+   if (device == NULL)
+     {
+       g_free (drive->device_file);
+-- 
+1.7.0.1
+

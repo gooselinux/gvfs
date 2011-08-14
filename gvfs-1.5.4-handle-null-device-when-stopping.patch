@@ -1,0 +1,94 @@
+From 349d2e8bb4f781ea7be9094d54438ff7e470b610 Mon Sep 17 00:00:00 2001
+From: David Zeuthen <davidz@redhat.com>
+Date: Fri, 19 Feb 2010 11:58:24 -0500
+Subject: [PATCH 062/100] Handle GduDevice being NULL when stopping the drive
+
+Signed-off-by: David Zeuthen <davidz@redhat.com>
+---
+ monitor/gdu/ggdudrive.c |   63 +++++++++++++++++++++++------------------------
+ 1 files changed, 31 insertions(+), 32 deletions(-)
+
+diff --git a/monitor/gdu/ggdudrive.c b/monitor/gdu/ggdudrive.c
+index 68a975f..5fc88e2 100644
+--- a/monitor/gdu/ggdudrive.c
++++ b/monitor/gdu/ggdudrive.c
+@@ -818,45 +818,44 @@ g_gdu_drive_stop_on_all_unmounted (GDrive              *_drive,
+   GSimpleAsyncResult *simple;
+   GduDevice *device;
+ 
+-  device = gdu_presentable_get_device (drive->presentable);
+-  if (device == NULL)
+-    {
+-      simple = g_simple_async_result_new_error (G_OBJECT (drive),
+-                                                callback,
+-                                                user_data,
+-                                                G_IO_ERROR,
+-                                                G_IO_ERROR_FAILED,
+-                                                "Drive is activatable and not running");
+-      g_simple_async_result_complete_in_idle (simple);
+-      g_object_unref (simple);
+-    }
+-  else
+-    {
+-      simple = g_simple_async_result_new (G_OBJECT (drive),
+-                                          callback,
+-                                          user_data,
+-                                          NULL);
++  simple = g_simple_async_result_new (G_OBJECT (drive),
++                                      callback,
++                                      user_data,
++                                      NULL);
+ 
+-      switch (drive->start_stop_type)
++  switch (drive->start_stop_type)
++    {
++    case G_DRIVE_START_STOP_TYPE_SHUTDOWN:
++      device = gdu_presentable_get_device (drive->presentable);
++      if (device == NULL)
+         {
+-        case G_DRIVE_START_STOP_TYPE_SHUTDOWN:
+-          gdu_device_op_drive_detach (device, stop_cb, simple);
+-          break;
+-
+-        case G_DRIVE_START_STOP_TYPE_MULTIDISK:
+-          gdu_drive_deactivate (GDU_DRIVE (drive->presentable), drive_deactivate_cb, simple);
+-          break;
+-
+-        default:
+           g_simple_async_result_set_error (simple,
+                                            G_IO_ERROR,
+-                                           G_IO_ERROR_NOT_SUPPORTED,
+-                                           "start_stop_type %d not supported",
+-                                           drive->start_stop_type);
++                                           G_IO_ERROR_FAILED,
++                                           "Cannot detach: drive has no GduDevice object");
+           g_simple_async_result_complete_in_idle (simple);
+           g_object_unref (simple);
+-          break;
+         }
++      else
++        {
++          gdu_device_op_drive_detach (device, stop_cb, simple);
++          g_object_unref (device);
++        }
++      break;
++
++    case G_DRIVE_START_STOP_TYPE_MULTIDISK:
++      gdu_drive_deactivate (GDU_DRIVE (drive->presentable), drive_deactivate_cb, simple);
++      break;
++
++    default:
++      g_simple_async_result_set_error (simple,
++                                       G_IO_ERROR,
++                                       G_IO_ERROR_NOT_SUPPORTED,
++                                       "start_stop_type %d not supported",
++                                       drive->start_stop_type);
++      g_simple_async_result_complete_in_idle (simple);
++      g_object_unref (simple);
++      break;
+     }
+ }
+ 
+-- 
+1.7.0.1
+

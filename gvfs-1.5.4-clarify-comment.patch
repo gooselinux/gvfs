@@ -1,0 +1,28 @@
+From 43caa40830960e2e295ec9fccb3eebef4885ab5a Mon Sep 17 00:00:00 2001
+From: David Zeuthen <davidz@redhat.com>
+Date: Fri, 19 Feb 2010 12:02:44 -0500
+Subject: [PATCH 065/100] Clarify comment in should_drive_be_ignored() function
+
+Signed-off-by: David Zeuthen <davidz@redhat.com>
+---
+ monitor/gdu/ggduvolumemonitor.c |    4 +---
+ 1 files changed, 1 insertions(+), 3 deletions(-)
+
+diff --git a/monitor/gdu/ggduvolumemonitor.c b/monitor/gdu/ggduvolumemonitor.c
+index bcf23f1..5a62514 100644
+--- a/monitor/gdu/ggduvolumemonitor.c
++++ b/monitor/gdu/ggduvolumemonitor.c
+@@ -849,9 +849,7 @@ should_drive_be_ignored (GduPool *pool, GduDrive *d, GList *fstab_mount_points)
+   device = gdu_presentable_get_device (GDU_PRESENTABLE (d));
+ 
+   /* If there is no GduDevice for a drive, then ignore it unless
+-   * we know how to start it. Right now this is only relevant
+-   * for GduLinuxMdDrive but we can add other stuff to libgdu
+-   * in the future and things will work here
++   * we know how to start it (e.g. RAID arrays, Volume Groups)
+    */
+   if (device == NULL)
+     {
+-- 
+1.7.0.1
+

@@ -1,0 +1,50 @@
+From 153fae8d1f6796686d46de0ecbd58281738f30e9 Mon Sep 17 00:00:00 2001
+From: Benjamin Otte <otte@redhat.com>
+Date: Sun, 07 Feb 2010 18:53:11 +0000
+Subject: ftp: put check if a method is supported into its own function
+
+---
+diff --git a/daemon/gvfsftptask.c b/daemon/gvfsftptask.c
+index fcf01ab..5393d0c 100644
+--- a/daemon/gvfsftptask.c
++++ b/daemon/gvfsftptask.c
+@@ -983,6 +983,17 @@ struct _GVfsFtpOpenDataConnectionMethod {
+     GVfsFtpOpenDataConnectionFunc func;
+ };
+ 
++static gboolean
++g_vfs_ftp_task_open_data_connection_method_is_supported (const GVfsFtpOpenDataConnectionMethod *method,
++                                                         GVfsFtpTask *                          task)
++{
++  if (method->required_feature &&
++      !g_vfs_backend_ftp_has_feature (task->backend, method->required_feature))
++    return FALSE;
++
++  return TRUE;
++}
++
+ static GVfsFtpMethod
+ g_vfs_ftp_task_setup_data_connection_any (GVfsFtpTask *task, GVfsFtpMethod unused)
+ {
+@@ -998,8 +1009,7 @@ g_vfs_ftp_task_setup_data_connection_any (GVfsFtpTask *task, GVfsFtpMethod unuse
+   /* first try all advertised features */
+   for (i = 0; i < G_N_ELEMENTS (funcs_ordered); i++)
+     {
+-      if (funcs_ordered[i].required_feature &&
+-          !g_vfs_backend_ftp_has_feature (task->backend, funcs_ordered[i].required_feature))
++      if (!g_vfs_ftp_task_open_data_connection_method_is_supported (&funcs_ordered[i], task))
+         continue;
+       method = funcs_ordered[i].func (task, G_VFS_FTP_METHOD_ANY);
+       if (method != G_VFS_FTP_METHOD_ANY)
+@@ -1011,8 +1021,7 @@ g_vfs_ftp_task_setup_data_connection_any (GVfsFtpTask *task, GVfsFtpMethod unuse
+   /* then try if the non-advertised features work */
+   for (i = 0; i < G_N_ELEMENTS (funcs_ordered); i++)
+     {
+-      if (!funcs_ordered[i].required_feature ||
+-          g_vfs_backend_ftp_has_feature (task->backend, funcs_ordered[i].required_feature))
++      if (g_vfs_ftp_task_open_data_connection_method_is_supported (&funcs_ordered[i], task))
+         continue;
+       method = funcs_ordered[i].func (task, G_VFS_FTP_METHOD_ANY);
+       if (method != G_VFS_FTP_METHOD_ANY)
+--
+cgit v0.8.3.1

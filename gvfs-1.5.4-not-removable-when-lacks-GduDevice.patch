@@ -1,0 +1,26 @@
+From 14c6de23dc069974f3edde72501dc053ae0f57ed Mon Sep 17 00:00:00 2001
+From: David Zeuthen <davidz@redhat.com>
+Date: Fri, 19 Feb 2010 11:57:39 -0500
+Subject: [PATCH 061/100] If a GGduDrive lacks a GduDevice, set removable to FALSE
+
+Signed-off-by: David Zeuthen <davidz@redhat.com>
+---
+ monitor/gdu/ggdudrive.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/monitor/gdu/ggdudrive.c b/monitor/gdu/ggdudrive.c
+index 4607223..68a975f 100644
+--- a/monitor/gdu/ggdudrive.c
++++ b/monitor/gdu/ggdudrive.c
+@@ -177,7 +177,7 @@ update_drive (GGduDrive *drive)
+       g_free (drive->device_file);
+       drive->dev = 0;
+       drive->device_file = NULL;
+-      drive->is_media_removable = TRUE;
++      drive->is_media_removable = FALSE;
+       drive->has_media = TRUE;
+       drive->can_eject = FALSE;
+       drive->can_poll_for_media = FALSE;
+-- 
+1.7.0.1
+

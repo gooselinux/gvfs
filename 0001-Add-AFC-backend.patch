@@ -1,0 +1,2192 @@
+From b6fda31fe81820259e432545b052980fa718d817 Mon Sep 17 00:00:00 2001
+From: Bastien Nocera <hadess@hadess.net>
+Date: Thu, 6 Aug 2009 22:55:47 +0100
+Subject: [PATCH 125/250] =?UTF-8?q?Bug=C2=A0591005=20-=20Add=20AFC=20backend?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Add a backend based on libiphone to access data on Apple's iPhone,
+and iPod Touch.
+
+Code by:
+Patrick Walton <pcwalton@cs.ucla.edu>
+Martin Szulecki <opensuse@sukimashita.com>
+Nikias Bassen <nikias@gmx.li>
+Bastien Nocera <hadess@hadess.net>
+
+http://bugzilla.gnome.org/show_bug.cgi?id=591005
+---
+ configure.ac                                       |   26 +-
+ daemon/Makefile.am                                 |   23 +
+ daemon/afc.mount.in                                |    7 +
+ daemon/gvfsbackendafc.c                            | 1216 ++++++++++++++++++++
+ daemon/gvfsbackendafc.h                            |   37 +
+ monitor/Makefile.am                                |    6 +-
+ monitor/afc/Makefile.am                            |   49 +
+ monitor/afc/afc.monitor                            |    5 +
+ monitor/afc/afcvolume.c                            |  350 ++++++
+ monitor/afc/afcvolume.h                            |   44 +
+ monitor/afc/afcvolumemonitor.c                     |  188 +++
+ monitor/afc/afcvolumemonitor.h                     |   39 +
+ monitor/afc/afcvolumemonitordaemon.c               |   31 +
+ .../org.gtk.Private.AfcVolumeMonitor.service.in    |    4 +
+ 14 files changed, 2023 insertions(+), 2 deletions(-)
+ create mode 100644 daemon/afc.mount.in
+ create mode 100644 daemon/gvfsbackendafc.c
+ create mode 100644 daemon/gvfsbackendafc.h
+ create mode 100644 monitor/afc/Makefile.am
+ create mode 100644 monitor/afc/afc.monitor
+ create mode 100644 monitor/afc/afcvolume.c
+ create mode 100644 monitor/afc/afcvolume.h
+ create mode 100644 monitor/afc/afcvolumemonitor.c
+ create mode 100644 monitor/afc/afcvolumemonitor.h
+ create mode 100644 monitor/afc/afcvolumemonitordaemon.c
+ create mode 100644 monitor/afc/org.gtk.Private.AfcVolumeMonitor.service.in
+
+diff --git a/configure.ac b/configure.ac
+index 2db4dcf..84543c5 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -324,6 +324,28 @@ AC_SUBST(CDDA_CFLAGS)
+ 
+ AM_CONDITIONAL(USE_CDDA, [test "$msg_cdda" = "yes"])
+ 
++dnl *************************************************
++dnl *** Check if we should build with AFC backend ***
++dnl *************************************************
++AC_ARG_ENABLE(afc, [  --disable-afc           build without AFC backend])
++msg_afc=no
++AFC_LIBS=
++AFC_CFLAGS=
++
++if test "x$enable_afc" != "xno" -a "x$msg_gudev" = "xyes" ; then
++  PKG_CHECK_EXISTS(libiphone-1.0 >= 0.9.2 libusbmuxd >= 1.0, msg_afc=yes)
++
++  if test "x$msg_afc" = "xyes"; then
++    PKG_CHECK_MODULES(AFC, libiphone-1.0 libusbmuxd >= 1.0)
++    AC_DEFINE(HAVE_AFC, 1, [Define to 1 if AFC is going to be built])
++  fi
++fi
++
++AC_SUBST(AFC_LIBS)
++AC_SUBST(AFC_CFLAGS)
++
++AM_CONDITIONAL(USE_AFC, [test "$msg_afc" = "yes"])
++
+ dnl *****************************************************
+ dnl *** Check if we should build with obexftp backend ***
+ dnl *****************************************************
+@@ -695,6 +717,7 @@ monitor/proxy/Makefile
+ monitor/hal/Makefile
+ monitor/gdu/Makefile
+ monitor/gphoto2/Makefile
++monitor/afc/Makefile
+ gconf/Makefile
+ programs/Makefile
+ test/Makefile
+@@ -712,7 +735,8 @@ echo "
+ 	FUSE support:                 $msg_fuse
+         CDDA support:                 $msg_cdda
+         Gphoto2 support:              $msg_gphoto2
+-	archive support:	      $msg_archive
++	archive support:              $msg_archive
++	AFC support:                  $msg_afc
+         GConf support:                $msg_gconf
+         DNS-SD support:               $msg_avahi
+ 	Build HAL volume monitor:     $msg_hal (with fast init path: $have_hal_fast_init)
+diff --git a/daemon/Makefile.am b/daemon/Makefile.am
+index a03eba1..cf68391 100644
+--- a/daemon/Makefile.am
++++ b/daemon/Makefile.am
+@@ -101,6 +101,12 @@ mount_DATA += archive.mount
+ libexec_PROGRAMS += gvfsd-archive
+ endif
+ 
++mount_in_files += afc.mount.in
++if USE_AFC
++mount_DATA += afc.mount
++libexec_PROGRAMS += gvfsd-afc
++endif
++
+ EXTRA_DIST = gvfs-daemon.service.in $(mount_in_files) obexftp-marshal.list
+ 
+ DISTCLEANFILES = gvfs-daemon.service $(mount_DATA)
+@@ -442,3 +448,20 @@ gvfsd_dav_LDADD = $(libraries) $(HTTP_LIBS)
+ if HAVE_AVAHI
+ gvfsd_dav_LDADD += $(top_builddir)/common/libgvfscommon-dnssd.la
+ endif
++
++gvfsd_afc_SOURCES = \
++	gvfsbackendafc.c gvfsbackendafc.h \
++	daemon-main.c daemon-main.h \
++	daemon-main-generic.c
++
++gvfsd_afc_CPPFLAGS = \
++	-DBACKEND_HEADER=gvfsbackendafc.h \
++	-DDEFAULT_BACKEND_TYPE=afc \
++	-DMAX_JOB_THREADS=1 \
++	$(AFC_CFLAGS) \
++	-DBACKEND_TYPES='"afc", G_VFS_TYPE_BACKEND_AFC,'
++
++gvfsd_afc_LDADD = \
++	$(libraries) \
++	$(AFC_LIBS)
++
+diff --git a/daemon/afc.mount.in b/daemon/afc.mount.in
+new file mode 100644
+index 0000000..727d833
+--- /dev/null
++++ b/daemon/afc.mount.in
+@@ -0,0 +1,7 @@
++[Mount]
++Type=afc
++Exec=@libexecdir@/gvfsd-afc
++AutoMount=false
++Scheme=afc
++DefaultPort=1
++
+diff --git a/daemon/gvfsbackendafc.c b/daemon/gvfsbackendafc.c
+new file mode 100644
+index 0000000..8c64b0d
+--- /dev/null
++++ b/daemon/gvfsbackendafc.c
+@@ -0,0 +1,1216 @@
++/*
++ * gvfs/daemon/gvfsbackendafc.c
++ *
++ * Copyright (c) 2008 Patrick Walton <pcwalton@cs.ucla.edu>
++ */
++
++#include <config.h>
++
++#include <limits.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
++#include <unistd.h>
++#include <sys/types.h>
++#include <glib/gi18n.h>
++#include <errno.h>
++
++#include <libiphone/libiphone.h>
++#include <libiphone/lockdown.h>
++#include <libiphone/afc.h>
++
++#include "gvfsbackendafc.h"
++#include "gvfsjobopenforread.h"
++#include "gvfsjobread.h"
++#include "gvfsjobseekread.h"
++#include "gvfsjobopenforwrite.h"
++#include "gvfsjobwrite.h"
++#include "gvfsjobseekwrite.h"
++#include "gvfsjobsetdisplayname.h"
++#include "gvfsjobqueryinfo.h"
++#include "gvfsjobqueryfsinfo.h"
++#include "gvfsjobqueryattributes.h"
++#include "gvfsjobenumerate.h"
++#include "gvfsdaemonprotocol.h"
++#include "gvfsdaemonutils.h"
++
++#define G_VFS_BACKEND_AFC_MAX_FILE_SIZE G_MAXINT64
++int g_blocksize = 4096; /* assume this is the default block size */
++
++struct _GVfsBackendAfc {
++  GVfsBackend backend;
++
++  char uuid[41];
++  char *service;
++  char *model;
++  gboolean connected;
++
++  iphone_device_t dev;
++  afc_client_t afc_cli;
++};
++
++struct afc_error_mapping {
++  afc_error_t from;
++  GIOErrorEnum to;
++};
++
++static struct afc_error_mapping afc_error_to_g_io_error[] = {
++      { AFC_E_UNKNOWN_ERROR            , G_IO_ERROR_FAILED },
++      { AFC_E_OP_HEADER_INVALID        , G_IO_ERROR_FAILED },
++      { AFC_E_NO_RESOURCES             , G_IO_ERROR_TOO_MANY_OPEN_FILES },
++      { AFC_E_READ_ERROR               , G_IO_ERROR_NOT_DIRECTORY },
++      { AFC_E_WRITE_ERROR              , G_IO_ERROR_FAILED },
++      { AFC_E_UNKNOWN_PACKET_TYPE      , G_IO_ERROR_FAILED },
++      { AFC_E_INVALID_ARGUMENT         , G_IO_ERROR_INVALID_ARGUMENT },
++      { AFC_E_OBJECT_NOT_FOUND         , G_IO_ERROR_NOT_FOUND },
++      { AFC_E_OBJECT_IS_DIR            , G_IO_ERROR_IS_DIRECTORY },
++      { AFC_E_DIR_NOT_EMPTY            , G_IO_ERROR_NOT_EMPTY },
++      { AFC_E_PERM_DENIED              , G_IO_ERROR_PERMISSION_DENIED },
++      { AFC_E_SERVICE_NOT_CONNECTED    , G_IO_ERROR_HOST_NOT_FOUND },
++      { AFC_E_OP_TIMEOUT               , G_IO_ERROR_TIMED_OUT },
++      { AFC_E_TOO_MUCH_DATA            , G_IO_ERROR_FAILED },
++      { AFC_E_END_OF_DATA              , G_IO_ERROR_FAILED },
++      { AFC_E_OP_NOT_SUPPORTED         , G_IO_ERROR_NOT_SUPPORTED },
++      { AFC_E_OBJECT_EXISTS            , G_IO_ERROR_EXISTS },
++      { AFC_E_OBJECT_BUSY              , G_IO_ERROR_BUSY },
++      { AFC_E_NO_SPACE_LEFT            , G_IO_ERROR_NO_SPACE },
++      { AFC_E_OP_WOULD_BLOCK           , G_IO_ERROR_WOULD_BLOCK },
++      { AFC_E_IO_ERROR                 , G_IO_ERROR_FAILED },
++      { AFC_E_OP_INTERRUPTED           , G_IO_ERROR_CANCELLED },
++      { AFC_E_OP_IN_PROGRESS           , G_IO_ERROR_PENDING },
++      { AFC_E_INTERNAL_ERROR           , G_IO_ERROR_FAILED },
++      { AFC_E_NOT_ENOUGH_DATA          , G_IO_ERROR_CLOSED },
++      { AFC_E_MUX_ERROR                , G_IO_ERROR_FAILED },
++      { -1 }
++};
++
++/**
++ * Tries to convert the AFC error value into a GIOError.
++ *
++ * @param client AFC client to retrieve status value from.
++ *
++ * @return errno value.
++ */
++static GIOErrorEnum
++g_io_error_from_afc_error (afc_error_t error)
++{
++  GIOErrorEnum res = G_IO_ERROR_FAILED;
++  int i = 0; gboolean found = FALSE;
++
++  while (afc_error_to_g_io_error[i++].from != -1)
++    {
++      if (afc_error_to_g_io_error[i].from == error)
++        {
++          res = afc_error_to_g_io_error[i++].to;
++          found = TRUE;
++          break;
++        }
++    }
++
++  if (!found)
++    g_warning ("Unknown AFC error (%d).\n", error);
++
++  return res;
++}
++
++G_DEFINE_TYPE(GVfsBackendAfc, g_vfs_backend_afc, G_VFS_TYPE_BACKEND)
++
++static void
++g_vfs_backend_afc_close_connection (GVfsBackendAfc *self)
++{
++  if (self->connected)
++    {
++      afc_client_free (self->afc_cli);
++      g_free (self->model);
++      self->model = NULL;
++      iphone_device_free (self->dev);
++    }
++  self->connected = FALSE;
++}
++
++static int
++g_vfs_backend_afc_check (afc_error_t cond, GVfsJob *job)
++{
++  GIOErrorEnum error;
++
++  if (G_LIKELY(cond == AFC_E_SUCCESS))
++        return 0;
++
++  error = g_io_error_from_afc_error (cond);
++  switch (cond)
++    {
++    case AFC_E_INTERNAL_ERROR:
++      g_vfs_job_failed (job, G_IO_ERROR, error,
++                        _("Internal Apple File Control error"));
++      break;
++    case AFC_E_OBJECT_NOT_FOUND:
++      g_vfs_job_failed (job, G_IO_ERROR, error,
++                        _("File does not exist"));
++    case AFC_E_DIR_NOT_EMPTY:
++      g_vfs_job_failed (job, G_IO_ERROR, error,
++                        _("The directory is not empty"));
++      break;
++    case AFC_E_OP_TIMEOUT:
++      g_vfs_job_failed (job, G_IO_ERROR, error,
++                        _("The device did not respond"));
++      break;
++    case AFC_E_NOT_ENOUGH_DATA:
++      g_vfs_job_failed (job, G_IO_ERROR, error,
++                        _("The connection was interrupted"));
++      break;
++    case AFC_E_MUX_ERROR:
++      g_vfs_job_failed (job, G_IO_ERROR, error,
++                        _("Invalid Apple File Control data received"));
++      break;
++    default:
++      g_vfs_job_failed (job, G_IO_ERROR, error,
++                        _("Unhandled Apple File Control error (%d)"), cond);
++      break;
++    }
++
++  return 1;
++}
++
++static int
++g_vfs_backend_lockdownd_check (lockdownd_error_t cond, GVfsJob *job)
++{
++  if (G_LIKELY(cond == LOCKDOWN_E_SUCCESS))
++        return 0;
++
++  switch (cond)
++    {
++    case LOCKDOWN_E_INVALID_ARG:
++      g_vfs_job_failed (job, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
++                        _("Lockdown Error: Invalid Argument"));
++      break;
++    default:
++      g_vfs_job_failed (job, G_IO_ERROR, G_IO_ERROR_FAILED,
++                        _("Unhandled Lockdown error (%d)"), cond);
++      break;
++    }
++
++  return 1;
++}
++
++static int
++g_vfs_backend_iphone_check (iphone_error_t cond, GVfsJob *job)
++{
++  if (G_LIKELY(cond == IPHONE_E_SUCCESS))
++        return 0;
++
++  switch (cond)
++    {
++    case IPHONE_E_INVALID_ARG:
++      g_vfs_job_failed (job, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
++                        _("iPhone Device Error: Invalid Argument"));
++      break;
++    case IPHONE_E_NO_DEVICE:
++      g_vfs_job_failed (job, G_IO_ERROR, G_IO_ERROR_FAILED,
++                        _("iPhone Device Error: No device found. Make sure usbmuxd is set up correctly."));
++    default:
++      g_vfs_job_failed (job, G_IO_ERROR, G_IO_ERROR_FAILED,
++                        _("Unhandled iPhone Device error (%d)"), cond);
++      break;
++    }
++
++  return 1;
++}
++
++static void
++_usbmuxd_event_cb (const usbmuxd_event_t *event, void *user_data)
++{
++  GVfsBackendAfc *afc_backend = G_VFS_BACKEND_AFC (user_data);
++
++  g_return_if_fail (afc_backend->uuid != NULL);
++  if (event->event != UE_DEVICE_REMOVE)
++    return;
++  if (g_str_equal (event->device.uuid, afc_backend->uuid) == FALSE)
++    return;
++
++  g_print ("Shutting down AFC backend for device uuid %s\n", afc_backend->uuid);
++
++  g_vfs_backend_afc_close_connection (afc_backend);
++
++  usbmuxd_unsubscribe();
++
++  /* TODO: need a cleaner way to force unmount ourselves */
++  exit (1);
++}
++
++/* Callback for mounting. */
++static void
++g_vfs_backend_afc_mount (GVfsBackend *backend,
++                         GVfsJobMount *job,
++                         GMountSpec *spec,
++                         GMountSource *src,
++                         gboolean automounting)
++{
++  const char *str;
++  char *tmp;
++  char *display_name;
++  int port, virtual_port;
++  GMountSpec *real_spec;
++  GVfsBackendAfc *self;
++  int retries;
++  iphone_error_t err;
++  lockdownd_client_t lockdown_cli = NULL;
++
++  self = G_VFS_BACKEND_AFC(backend);
++  self->connected = FALSE;
++  usbmuxd_subscribe (_usbmuxd_event_cb, self);
++
++  /* setup afc */
++
++  str = g_mount_spec_get(spec, "host");
++  if (G_UNLIKELY(str == NULL))
++    {
++      g_vfs_job_failed (G_VFS_JOB (job),
++                        G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
++                        _("Invalid mount spec"));
++      return;
++    }
++  if (G_UNLIKELY(sscanf(str, "%40s", (char *) &self->uuid) < 1))
++    {
++      g_vfs_job_failed (G_VFS_JOB(job), G_IO_ERROR, G_IO_ERROR_FAILED,
++                        _("Invalid AFC location: must be in the form of "
++                          "afc://uuid:port-number"));
++      return;
++    }
++
++  str = g_mount_spec_get (spec, "port");
++  if (str == NULL)
++    virtual_port = 1;
++  else
++    virtual_port = atoi (str);
++
++  /* set a generic display name */
++  if (virtual_port >= 2)
++    {
++      self->service = g_strdup_printf ("com.apple.afc%d", virtual_port);
++      display_name = g_strdup_printf (_("Service %d on Apple Mobile Device"),
++                                      virtual_port);
++    }
++  else
++    {
++      self->service = g_strdup ("com.apple.afc");
++      display_name = g_strdup_printf (_("Apple Mobile Device"));
++    }
++
++  g_vfs_backend_set_display_name (G_VFS_BACKEND(self), display_name);
++  g_free (display_name);
++
++  real_spec = g_mount_spec_new ("afc");
++  tmp = g_strdup_printf ("%40s", (char *) &self->uuid);
++  g_mount_spec_set (real_spec, "host", tmp);
++  g_free (tmp);
++
++  /* INFO: Don't ever set the DefaultPort again or everything goes crazy */
++  if (virtual_port != 1)
++    {
++      tmp = g_strdup_printf ("%d", virtual_port);
++      g_mount_spec_set (real_spec, "port", tmp);
++      g_free (tmp);
++    }
++
++  g_vfs_backend_set_mount_spec (G_VFS_BACKEND(self), real_spec);
++  g_mount_spec_unref (real_spec);
++
++  retries = 0;
++  do {
++      err = iphone_get_device_by_uuid(&self->dev, self->uuid);
++      if (err == IPHONE_E_SUCCESS)
++          break;
++      g_usleep (G_USEC_PER_SEC);
++  } while (retries++ < 10);
++
++  if (G_UNLIKELY(g_vfs_backend_iphone_check(err, G_VFS_JOB(job))))
++    goto out_destroy_service;
++  if (G_UNLIKELY(g_vfs_backend_lockdownd_check (lockdownd_client_new (self->dev,
++                                                                      &lockdown_cli),
++                                                G_VFS_JOB(job))))
++    {
++      goto out_destroy_dev;
++    }
++
++  /* try to use pretty device name */
++  if (LOCKDOWN_E_SUCCESS == lockdownd_get_device_name (lockdown_cli, &display_name))
++    {
++      if (display_name)
++        {
++          if (virtual_port >= 2)
++            {
++              /* translators:
++               * This is the device name, with the service being browsed in brackets, eg.:
++               * Alan Smithee's iPhone (Service 2 on Apple Mobile Device */
++              g_vfs_backend_set_display_name (G_VFS_BACKEND(self),
++                                              g_strdup_printf (_("%s (%s)"), display_name, self->service));
++            }
++          else
++            {
++              g_vfs_backend_set_display_name (G_VFS_BACKEND(self), display_name);
++            }
++          g_free (display_name);
++      }
++    }
++
++  if (G_UNLIKELY(g_vfs_backend_lockdownd_check (lockdownd_start_service (lockdown_cli,
++                                                                         self->service, &port),
++                                                G_VFS_JOB(job))))
++    {
++      goto out_destroy_lockdown;
++    }
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_client_new (self->dev,
++                                                          port, &self->afc_cli),
++                                          G_VFS_JOB(job))))
++    {
++      goto out_destroy_lockdown;
++    }
++
++  /* set correct fd icon spec name depending on device model */
++  self->model = afc_get_device_info_field (self->afc_cli, "Model");
++  if (G_UNLIKELY(self->model == NULL))
++    goto out_destroy_afc;
++
++  if (strstr(self->model, "iPod") != NULL)
++    {
++      g_vfs_backend_set_icon_name (G_VFS_BACKEND(self), "multimedia-player-apple-ipod-touch");
++    }
++  else
++    {
++      g_vfs_backend_set_icon_name (G_VFS_BACKEND(self), "phone-apple-iphone");
++    }
++
++  /* lockdown connection is not needed anymore */
++  lockdownd_client_free (lockdown_cli);
++
++  self->connected = TRUE;
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++  return;
++
++out_destroy_afc:
++  afc_client_free (self->afc_cli);
++
++out_destroy_lockdown:
++  lockdownd_client_free (lockdown_cli);
++
++out_destroy_dev:
++  iphone_device_free (self->dev);
++
++out_destroy_service:
++  g_free (self->service);
++  g_free(self->model);
++}
++
++static void
++g_vfs_backend_afc_unmount (GVfsBackend *backend,
++                           GVfsJobUnmount *job,
++                           GMountUnmountFlags flags,
++                           GMountSource *mount_source)
++{
++  GVfsBackendAfc *self;
++
++  /* FIXME: check on G_MOUNT_UNMOUNT_FORCE flag */
++  self = G_VFS_BACKEND_AFC (backend);
++  g_vfs_backend_afc_close_connection (self);
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++}
++
++/* Callback to open an existing file for reading. */
++static void
++g_vfs_backend_afc_open_for_read (GVfsBackend *backend,
++                                 GVfsJobOpenForRead *job,
++                                 const char *path)
++{
++  uint64_t fd = 0;
++  GVfsBackendAfc *self;
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail (self->connected);
++
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_file_open (self->afc_cli,
++                                                         path, AFC_FOPEN_RDONLY, &fd),
++                                          G_VFS_JOB(job))))
++    {
++      return;
++    }
++
++  g_vfs_job_open_for_read_set_handle (job, GUINT_TO_POINTER((gulong) fd));
++  g_vfs_job_open_for_read_set_can_seek (job, TRUE);
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++
++  return;
++}
++
++/* Callback to open a nonexistent file for writing. */
++static void
++g_vfs_backend_afc_create (GVfsBackend *backend,
++                          GVfsJobOpenForWrite *job,
++                          const char *path,
++                          GFileCreateFlags flags)
++{
++  uint64_t fd = 0;
++  GVfsBackendAfc *self;
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail (self->connected);
++
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_file_open (self->afc_cli,
++                                                         path, AFC_FOPEN_RW, &fd),
++                                          G_VFS_JOB(job))))
++    {
++      return;
++    }
++
++  g_vfs_job_open_for_write_set_handle (job, GUINT_TO_POINTER((gulong)fd));
++  g_vfs_job_open_for_write_set_can_seek (job, TRUE);
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++
++  return;
++}
++
++/* Callback to open a possibly-existing file for writing. */
++static void
++g_vfs_backend_afc_append_to (GVfsBackend *backend,
++                             GVfsJobOpenForWrite *job,
++                             const char *path,
++                             GFileCreateFlags flags)
++{
++  uint64_t fd = 0;
++  uint64_t off = 0;
++  GVfsBackendAfc *self;
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail (self->connected);
++
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_file_open (self->afc_cli,
++                                                         path, AFC_FOPEN_RW, &fd),
++                                          G_VFS_JOB(job))))
++    {
++      return;
++    }
++
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_file_seek (self->afc_cli,
++                                                         fd, 0, SEEK_END),
++                                          G_VFS_JOB(job))))
++    {
++      return;
++    }
++
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_file_tell (self->afc_cli,
++                                                         fd, &off),
++                                          G_VFS_JOB(job))))
++    {
++      return;
++    }
++
++  g_vfs_job_open_for_write_set_handle (job, GUINT_TO_POINTER((gulong)fd));
++  g_vfs_job_open_for_write_set_can_seek (job, TRUE);
++  g_vfs_job_open_for_write_set_initial_offset (job, off);
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++
++  return;
++}
++
++static void
++g_vfs_backend_afc_replace (GVfsBackend *backend,
++                           GVfsJobOpenForWrite *job,
++                           const char *filename,
++                           const char *etag,
++                           gboolean make_backup,
++                           GFileCreateFlags flags)
++{
++  uint64_t fd = 0;
++  GVfsBackendAfc *self;
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail(self->connected);
++
++  if (make_backup)
++    {
++      /* FIXME: implement! */
++      g_vfs_job_failed (G_VFS_JOB (job),
++                        G_IO_ERROR,
++                        G_IO_ERROR_CANT_CREATE_BACKUP,
++                        _("Backups are not yet supported."));
++      return;
++    }
++
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_file_open (self->afc_cli,
++                                                         filename, AFC_FOPEN_WR, &fd),
++                                          G_VFS_JOB(job))))
++    {
++      return;
++    }
++
++  g_vfs_job_open_for_write_set_handle (job, GUINT_TO_POINTER((gulong)fd));
++  g_vfs_job_open_for_write_set_can_seek (job, TRUE);
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++
++  return;
++}
++
++/* Callback to close a file that was previously opened for reading. */
++static void
++g_vfs_backend_afc_close_read (GVfsBackend *backend,
++                              GVfsJobCloseRead *job,
++                              GVfsBackendHandle handle)
++{
++  GVfsBackendAfc *self;
++  uint64_t fd = 0;
++
++  fd = GPOINTER_TO_UINT(handle);
++  g_return_if_fail (fd != 0);
++
++  self = G_VFS_BACKEND_AFC(backend);
++
++  if (self->connected)
++    afc_file_close (self->afc_cli, fd);
++
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++}
++
++static void
++g_vfs_backend_afc_close_write (GVfsBackend *backend,
++                               GVfsJobCloseWrite *job,
++                               GVfsBackendHandle handle)
++{
++  GVfsBackendAfc *self;
++  uint64_t fd = 0;
++
++  fd = GPOINTER_TO_UINT(handle);
++  g_return_if_fail (fd != 0);
++
++  self = G_VFS_BACKEND_AFC(backend);
++
++  if (self->connected)
++    afc_file_close(self->afc_cli, fd);
++
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++}
++
++static void
++g_vfs_backend_afc_read (GVfsBackend *backend,
++                        GVfsJobRead *job,
++                        GVfsBackendHandle handle,
++                        char *buffer,
++                        gsize req)
++{
++  guint32 nread = 0;
++  GVfsBackendAfc *self;
++  uint64_t fd = 0;
++
++  fd = GPOINTER_TO_UINT(handle);
++  g_return_if_fail (fd != 0);
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail (self->connected);
++
++  if (req > 0 &&
++      G_UNLIKELY(g_vfs_backend_afc_check (afc_file_read (self->afc_cli,
++                                                         fd, buffer, req, &nread),
++                                          G_VFS_JOB(job))))
++    {
++      return;
++    }
++
++  g_vfs_job_read_set_size (job, nread);
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++}
++
++static void
++g_vfs_backend_afc_write (GVfsBackend *backend,
++                         GVfsJobWrite *job,
++                         GVfsBackendHandle handle,
++                         char *buffer,
++                         gsize sz)
++{
++  guint32 nwritten = 0;
++  GVfsBackendAfc *self;
++  uint64_t fd = 0;
++
++  fd = GPOINTER_TO_UINT(handle);
++  g_return_if_fail (fd != 0);
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail (self->connected);
++
++  if (sz > 0 &&
++      G_UNLIKELY(g_vfs_backend_afc_check(afc_file_write (self->afc_cli,
++                                                         fd, buffer, sz, &nwritten),
++                                         G_VFS_JOB(job))))
++    {
++      return;
++    }
++
++  g_vfs_job_write_set_written_size (job, nwritten);
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++}
++
++static int
++g_vfs_backend_afc_seek (GVfsBackendAfc *self,
++                        GVfsJob *job,
++                        GVfsBackendHandle handle,
++                        goffset offset,
++                        GSeekType type)
++{
++  int afc_seek_type;
++  uint64_t fd = 0;
++
++  switch (type)
++    {
++    case G_SEEK_SET:
++      afc_seek_type = SEEK_SET;
++      break;
++    case G_SEEK_CUR:
++      afc_seek_type = SEEK_CUR;
++      break;
++    case G_SEEK_END:
++      afc_seek_type = SEEK_END;
++      break;
++    default:
++      g_vfs_job_failed(job, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
++                       _("Invalid seek type"));
++      return 1;
++    }
++
++  fd = GPOINTER_TO_UINT(handle);
++
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_file_seek (self->afc_cli,
++                                                         fd, offset, afc_seek_type),
++                                          job)))
++    {
++      return 1;
++    }
++
++  return 0;
++}
++
++static void
++g_vfs_backend_afc_seek_on_read (GVfsBackend *backend,
++                                GVfsJobSeekRead *job,
++                                GVfsBackendHandle handle,
++                                goffset offset,
++                                GSeekType type)
++{
++  GVfsBackendAfc *self;
++
++  g_return_if_fail (handle != NULL);
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail (self->connected);
++
++  if (!g_vfs_backend_afc_seek (self, G_VFS_JOB(job), handle, offset, type))
++    {
++      g_vfs_job_seek_read_set_offset (job, offset);
++      g_vfs_job_succeeded (G_VFS_JOB(job));
++    }
++}
++
++static void
++g_vfs_backend_afc_seek_on_write (GVfsBackend *backend,
++                                 GVfsJobSeekWrite *job,
++                                 GVfsBackendHandle handle,
++                                 goffset offset,
++                                 GSeekType type)
++{
++  GVfsBackendAfc *self;
++
++  g_return_if_fail (handle != NULL);
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail (self->connected);
++
++  if (!g_vfs_backend_afc_seek (self, G_VFS_JOB(job), handle, offset, type))
++    {
++      g_vfs_job_seek_write_set_offset (job, offset);
++      g_vfs_job_succeeded (G_VFS_JOB(job));
++    }
++}
++
++static void
++g_vfs_backend_afc_set_info_from_afcinfo (GVfsBackendAfc *self,
++                                         GFileInfo *info,
++                                         char **afcinfo,
++                                         const char *basename,
++                                         GFileAttributeMatcher *matcher,
++                                         GFileQueryInfoFlags flags)
++{
++  GFileType type = G_FILE_TYPE_REGULAR;
++  GIcon *icon = NULL;
++  gchar *content_type = NULL;
++  char *display_name;
++  char *linktarget = NULL;
++  char **afctargetinfo = NULL;
++  int i;
++
++  /* get file attributes from info list */
++  for (i = 0; afcinfo[i]; i += 2)
++    {
++      if (afcinfo[i] == NULL)
++        continue;
++      if (g_str_equal (afcinfo[i], "st_size"))
++        {
++          g_file_info_set_size (info, atoll(afcinfo[i+1]));
++        } else if (g_str_equal (afcinfo[i], "st_blocks"))
++          {
++            g_file_info_set_attribute_uint64 (info, G_FILE_ATTRIBUTE_UNIX_BLOCKS, atoi(afcinfo[i+1]));
++          }
++      else if (g_str_equal (afcinfo[i], "st_ifmt"))
++        {
++          if (g_str_equal (afcinfo[i+1], "S_IFREG"))
++            {
++              type = G_FILE_TYPE_REGULAR;
++            }
++          else if (g_str_equal (afcinfo[i+1], "S_IFDIR"))
++            {
++              type = G_FILE_TYPE_DIRECTORY;
++            }
++          else if (g_str_equal (afcinfo[i+1], "S_IFLNK"))
++            {
++              type = G_FILE_TYPE_SYMBOLIC_LINK;
++              content_type = g_strdup ("inode/symlink");
++            }
++          else if (g_str_equal (afcinfo[i+1], "S_IFBLK"))
++            {
++              type = G_FILE_TYPE_SPECIAL;
++              content_type = g_strdup ("inode/blockdevice");
++            }
++          else if (g_str_equal (afcinfo[i+1], "S_IFCHR"))
++            {
++              type = G_FILE_TYPE_SPECIAL;
++              content_type = g_strdup ("inode/chardevice");
++            }
++          else if (g_str_equal (afcinfo[i+1], "S_IFIFO"))
++            {
++              type = G_FILE_TYPE_SPECIAL;
++              content_type = g_strdup ("inode/fifo");
++            }
++          else if (g_str_equal (afcinfo[i+1], "S_IFSOCK"))
++            {
++              type = G_FILE_TYPE_SPECIAL;
++              content_type = g_strdup ("inode/socket");
++            }
++          g_file_info_set_file_type (info, type);
++        }
++      else if (g_str_equal (afcinfo[i], "st_nlink"))
++        {
++          g_file_info_set_attribute_uint32 (info, G_FILE_ATTRIBUTE_UNIX_NLINK, atoi(afcinfo[i+1]));
++        }
++      else if (g_str_equal (afcinfo[i], "LinkTarget"))
++        {
++          linktarget = g_strdup (afcinfo[i+1]);
++          g_file_info_set_symlink_target (info, linktarget);
++          g_file_info_set_is_symlink (info, TRUE);
++        }
++    }
++
++  /* and set some additional info */
++  g_file_info_set_attribute_uint32 (info, G_FILE_ATTRIBUTE_UNIX_UID, getuid ());
++  g_file_info_set_attribute_uint32 (info, G_FILE_ATTRIBUTE_UNIX_GID, getgid ());
++
++  /*
++   * Maybe this icon stuff should be moved out into a generic function? It
++   * seems a little funny to put this in the backends.
++   */
++  if (g_file_attribute_matcher_matches (matcher, G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE)
++      || g_file_attribute_matcher_matches (matcher, G_FILE_ATTRIBUTE_STANDARD_ICON))
++    {
++      if (type == G_FILE_TYPE_DIRECTORY)
++        {
++          content_type = g_strdup ("inode/directory");
++          icon = g_themed_icon_new ("folder");
++        }
++      else
++        {
++          if (content_type == NULL)
++            content_type = g_content_type_guess (basename, NULL, 0, NULL);
++          if (content_type)
++            {
++              icon = g_content_type_get_icon (content_type);
++              if (G_IS_THEMED_ICON(icon))
++                g_themed_icon_append_name (G_THEMED_ICON(icon), "text-x-generic");
++            }
++        }
++
++      if (content_type)
++        g_file_info_set_content_type (info, content_type);
++
++      if (icon == NULL)
++        icon = g_themed_icon_new ("text-x-generic");
++
++      g_file_info_set_icon (info, icon);
++      g_object_unref (icon);
++    }
++
++  g_free (content_type);
++
++  /* for symlinks to work we need to return GFileInfo for the linktarget */
++  if ((flags & G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS) == 0)
++    {
++      if (type == G_FILE_TYPE_SYMBOLIC_LINK)
++        {
++          /* query the linktarget instead and merge the file info of it */
++          if (AFC_E_SUCCESS == afc_get_file_info (self->afc_cli, linktarget, &afctargetinfo))
++            g_vfs_backend_afc_set_info_from_afcinfo (self, info, afctargetinfo, linktarget, matcher, flags);
++          if (afctargetinfo)
++            g_strfreev (afctargetinfo);
++        }
++    }
++
++  g_free (linktarget);
++
++  /* regardless of symlink recursion; still set the basename of the source */
++  g_file_info_set_name(info, basename);
++
++  /* handle root directory */
++  if (g_str_equal (basename, "/"))
++    display_name = g_strdup (g_vfs_backend_get_display_name (G_VFS_BACKEND(self)));
++  else
++    display_name = g_filename_display_name (basename);
++
++  if (g_file_attribute_matcher_matches (matcher, G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME))
++    g_file_info_set_display_name (info, display_name);
++
++  if (g_file_attribute_matcher_matches (matcher, G_FILE_ATTRIBUTE_STANDARD_EDIT_NAME))
++    g_file_info_set_edit_name (info, display_name);
++
++  g_free (display_name);
++}
++
++/* Callback for iterating over a directory. */
++static void
++g_vfs_backend_afc_enumerate (GVfsBackend *backend,
++                             GVfsJobEnumerate *job,
++                             const char *path,
++                             GFileAttributeMatcher *matcher,
++                             GFileQueryInfoFlags flags)
++{
++  GFileInfo *info;
++  GVfsBackendAfc *self;
++  gboolean trailing_slash;
++  gchar *file_path;
++  char **ptr, **list = NULL;
++  char **afcinfo = NULL;
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail (self->connected);
++
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_read_directory (self->afc_cli, path, &list),
++                                          G_VFS_JOB(job))))
++    {
++      return;
++    }
++
++  trailing_slash = g_str_has_suffix (path, "/");
++
++  for (ptr = list; *ptr; ptr++)
++    {
++      if (g_str_equal(*ptr, ".") || g_str_equal(*ptr, ".."))
++        continue;
++
++      if (!trailing_slash)
++        file_path = g_strdup_printf ("%s/%s", path, *ptr);
++      else
++        file_path = g_strdup_printf ("%s%s", path, *ptr);
++
++      /*
++       * This call might fail if the file in question is removed while we're
++       * iterating over the directory list. In that case, just don't include
++       * it in the list.
++       */
++      if (G_LIKELY(afc_get_file_info(self->afc_cli, file_path, &afcinfo) == AFC_E_SUCCESS))
++        {
++          info = g_file_info_new ();
++          g_vfs_backend_afc_set_info_from_afcinfo (self, info, afcinfo, *ptr, matcher, flags);
++          g_vfs_job_enumerate_add_info (job, info);
++          g_object_unref (G_OBJECT(info));
++          g_strfreev (afcinfo);
++        }
++
++      g_free (file_path);
++    }
++
++  g_strfreev (list);
++
++  g_vfs_job_enumerate_done (job);
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++}
++
++static void
++g_vfs_backend_afc_query_info (GVfsBackend *backend,
++                              GVfsJobQueryInfo *job,
++                              const char *path,
++                              GFileQueryInfoFlags flags,
++                              GFileInfo *info,
++                              GFileAttributeMatcher *matcher)
++{
++  GVfsBackendAfc *self;
++  const char *basename, *ptr;
++  char **afcinfo = NULL;
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail (self->connected);
++
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_get_file_info (self->afc_cli, path, &afcinfo),
++                                          G_VFS_JOB(job))))
++    {
++      if (afcinfo)
++        g_strfreev(afcinfo);
++      return;
++    }
++
++  ptr = strrchr (path, '/');
++  if (ptr && ptr[1] != '\0')
++    basename = ptr + 1;
++  else
++    basename = path;
++
++  g_vfs_backend_afc_set_info_from_afcinfo (self, info, afcinfo, basename, matcher, flags);
++  if (afcinfo)
++    g_strfreev (afcinfo);
++
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++}
++
++/*
++ * The following keys are currently known:
++ *   Model: 'iPhone1,1'
++ *   FSTotalBytes: storage capacity of drive
++ *   FSFreeBytes: free space on drive
++ *   FSBlockSize: block granularity
++ */
++static void
++g_vfs_backend_afc_query_fs_info (GVfsBackend *backend,
++                                 GVfsJobQueryFsInfo *job,
++                                 const char *path,
++                                 GFileInfo *info,
++                                 GFileAttributeMatcher *matcher)
++{
++  GVfsBackendAfc *self;
++  char **kvps, **ptr;
++  uint64_t totalspace = 0, freespace = 0;
++  int blocksize = 0;
++
++  self = G_VFS_BACKEND_AFC(backend);
++
++  g_file_info_set_attribute_string (info, G_FILE_ATTRIBUTE_FILESYSTEM_TYPE, "afc");
++
++  if (self->connected)
++    {
++      if (G_UNLIKELY(g_vfs_backend_afc_check (afc_get_device_info (self->afc_cli, &kvps), G_VFS_JOB(job))))
++        return;
++
++      for (ptr = kvps; *ptr; ptr++)
++        {
++          if (g_str_equal (*ptr, "FSTotalBytes"))
++            {
++              totalspace = g_ascii_strtoull (*(ptr+1), (char **) NULL, 10);
++            }
++          else if (g_str_equal (*ptr, "FSFreeBytes"))
++            {
++              freespace = g_ascii_strtoull (*(ptr+1), (char **) NULL, 10);
++            }
++          else if (g_str_equal (*ptr, "FSBlockSize"))
++            {
++              blocksize = atoi (*(ptr+1));
++            }
++        }
++
++      g_strfreev (kvps);
++
++      g_file_info_set_attribute_uint32 (info,
++                                        G_FILE_ATTRIBUTE_UNIX_BLOCK_SIZE,
++                                        (guint32) blocksize);
++      g_file_info_set_attribute_uint64 (info,
++                                        G_FILE_ATTRIBUTE_FILESYSTEM_SIZE,
++                                        (guint64) totalspace);
++      g_file_info_set_attribute_uint64 (info,
++                                        G_FILE_ATTRIBUTE_FILESYSTEM_FREE,
++                                        (guint64) freespace);
++      g_file_info_set_attribute_boolean (info,
++                                         G_FILE_ATTRIBUTE_FILESYSTEM_READONLY,
++                                         FALSE);
++      g_file_info_set_attribute_uint32 (info,
++                                        G_FILE_ATTRIBUTE_FILESYSTEM_USE_PREVIEW,
++                                        G_FILESYSTEM_PREVIEW_TYPE_IF_LOCAL);
++    }
++
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++}
++
++static void
++g_vfs_backend_afc_set_display_name (GVfsBackend *backend,
++                                    GVfsJobSetDisplayName *job,
++                                    const char *filename,
++                                    const char *display_name)
++{
++  GVfsBackendAfc *self;
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail (self->connected);
++
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_rename_path (self->afc_cli,
++                                                           filename, display_name),
++                                          G_VFS_JOB(job))))
++    {
++      return;
++    }
++
++  g_vfs_job_set_display_name_set_new_path (job, display_name);
++
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++}
++
++static void
++g_vfs_backend_afc_make_directory (GVfsBackend *backend,
++                                  GVfsJobMakeDirectory *job,
++                                  const char *path)
++{
++  GVfsBackendAfc *self;
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail(self->connected);
++
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_make_directory (self->afc_cli,
++                                                              path),
++                                          G_VFS_JOB(job))))
++    {
++      return;
++    }
++
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++}
++
++static void
++g_vfs_backend_afc_make_symlink (GVfsBackend *backend,
++                                GVfsJobMakeSymlink *job,
++                                const char *filename,
++                                const char *symlink_value)
++{
++  GVfsBackendAfc *self;
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail (self->connected);
++
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_make_link (self->afc_cli,
++                                                         AFC_SYMLINK, symlink_value, filename),
++                                          G_VFS_JOB(job))))
++    {
++      return;
++    }
++
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++}
++
++static void
++g_vfs_backend_afc_move (GVfsBackend *backend,
++                        GVfsJobMove *job,
++                        const char *source,
++                        const char *destination,
++                        GFileCopyFlags flags,
++                        GFileProgressCallback progress_callback,
++                        gpointer progress_callback_data)
++{
++  GVfsBackendAfc *self;
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail(self->connected);
++
++  if (flags & G_FILE_COPY_BACKUP)
++    {
++      /* FIXME: implement! */
++      g_vfs_job_failed (G_VFS_JOB (job),
++                        G_IO_ERROR,
++                        G_IO_ERROR_CANT_CREATE_BACKUP,
++                        _("Backups are not yet supported."));
++      return;
++    }
++
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_rename_path (self->afc_cli,
++                                                           source, destination),
++                                          G_VFS_JOB(job))))
++    {
++      return;
++    }
++
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++}
++
++static void
++g_vfs_backend_afc_delete (GVfsBackend *backend,
++                          GVfsJobDelete *job,
++                          const char *filename)
++{
++  GVfsBackendAfc *self;
++
++  self = G_VFS_BACKEND_AFC(backend);
++  g_return_if_fail (self->connected);
++
++  if (G_UNLIKELY(g_vfs_backend_afc_check (afc_remove_path (self->afc_cli,
++                                                           filename),
++                                          G_VFS_JOB(job))))
++    {
++      return;
++    }
++
++  g_vfs_job_succeeded (G_VFS_JOB(job));
++}
++
++
++static void
++g_vfs_backend_afc_finalize (GObject *obj)
++{
++  GVfsBackendAfc *self;
++
++  self = G_VFS_BACKEND_AFC(obj);
++  g_vfs_backend_afc_close_connection (self);
++
++  if (G_OBJECT_CLASS(g_vfs_backend_afc_parent_class)->finalize)
++    (*G_OBJECT_CLASS(g_vfs_backend_afc_parent_class)->finalize) (obj);
++}
++
++static void
++g_vfs_backend_afc_init (GVfsBackendAfc *self)
++{
++  if (g_getenv ("GVFS_DEBUG") != NULL)
++    {
++      /* enable full debugging */
++      iphone_set_debug_level (1);
++      iphone_set_debug_mask (DBGMASK_ALL);
++    }
++}
++
++static void
++g_vfs_backend_afc_class_init (GVfsBackendAfcClass *klass)
++{
++  GObjectClass *gobject_class = G_OBJECT_CLASS(klass);
++  GVfsBackendClass *backend_class = G_VFS_BACKEND_CLASS(klass);
++
++  gobject_class->finalize = g_vfs_backend_afc_finalize;
++
++  backend_class->mount            = g_vfs_backend_afc_mount;
++  backend_class->unmount          = g_vfs_backend_afc_unmount;
++  backend_class->open_for_read    = g_vfs_backend_afc_open_for_read;
++  backend_class->close_read       = g_vfs_backend_afc_close_read;
++  backend_class->read             = g_vfs_backend_afc_read;
++  backend_class->seek_on_read     = g_vfs_backend_afc_seek_on_read;
++  backend_class->create           = g_vfs_backend_afc_create;
++  backend_class->append_to        = g_vfs_backend_afc_append_to;
++  backend_class->replace          = g_vfs_backend_afc_replace;
++  backend_class->close_write      = g_vfs_backend_afc_close_write;
++  backend_class->write            = g_vfs_backend_afc_write;
++  backend_class->seek_on_write    = g_vfs_backend_afc_seek_on_write;
++  backend_class->enumerate        = g_vfs_backend_afc_enumerate;
++  backend_class->query_info       = g_vfs_backend_afc_query_info;
++  backend_class->query_fs_info    = g_vfs_backend_afc_query_fs_info;
++  backend_class->make_directory   = g_vfs_backend_afc_make_directory;
++  backend_class->delete           = g_vfs_backend_afc_delete;
++  backend_class->make_symlink     = g_vfs_backend_afc_make_symlink;
++  backend_class->move             = g_vfs_backend_afc_move;
++  backend_class->set_display_name = g_vfs_backend_afc_set_display_name;
++}
++
++/*
++ * vim: sw=2 ts=8 cindent expandtab cinoptions=f0,>4,n2,{2,(0,^-2,t0 ai
++ */
+diff --git a/daemon/gvfsbackendafc.h b/daemon/gvfsbackendafc.h
+new file mode 100644
+index 0000000..6291180
+--- /dev/null
++++ b/daemon/gvfsbackendafc.h
+@@ -0,0 +1,37 @@
++/*
++ * gvfs/daemon/gvfsbackendafc.h
++ *
++ * Copyright (c) 2008 Patrick Walton <pcwalton@ucla.edu>
++ */
++
++#ifndef GVFSBACKENDAFC_H
++#define GVFSBACKENDAFC_H
++
++#include <gvfsbackend.h>
++#include <gmountspec.h>
++
++G_BEGIN_DECLS
++
++#define G_VFS_TYPE_BACKEND_AFC   (g_vfs_backend_afc_get_type())
++#define G_VFS_BACKEND_AFC(o) (G_TYPE_CHECK_INSTANCE_CAST((o), G_VFS_TYPE_BACKEND_AFC, GVfsBackendAfc))
++#define G_VFS_BACKEND_AFC_CLASS(k) (G_TYPE_CHECK_CLASS_CAST((k), G_VFS_TYPE_BACKEND_AFC, GVfsBackendAfcClass))
++#define G_VFS_IS_BACKEND_AFC(o) (G_TYPE_CHECK_INSTANCE_TYPE((o), G_VFS_TYPE_BACKEND_AFC))
++#define G_VFS_IS_BACKEND_AFC_CLASS(k) (G_TYPE_CHECK_CLASS_TYPE((k), G_VFS_TYPE_BACKEND_AFC))
++#define G_VFS_BACKEND_AFC_GET_CLASS(o) (G_TYPE_INSTANCE_GET_CLASS((o), G_VFS_TYPE_BACKEND_AFC, GVfsBackendAfcClass))
++
++typedef struct _GVfsBackendAfc GVfsBackendAfc;
++typedef struct _GVfsBackendAfcClass GVfsBackendAfcClass;
++
++struct _GVfsBackendAfcClass {
++    GVfsBackendClass parent_class;
++};
++
++GType g_vfs_backend_afc_get_type (void) G_GNUC_CONST;
++
++G_END_DECLS
++
++#endif /* GVFSBACKENDAFC_H */
++
++/*
++ * vim: sw=2 ts=8 cindent expandtab cinoptions=f0,>4,n2,{2,(0,^-2,t0 ai
++ */
+diff --git a/monitor/Makefile.am b/monitor/Makefile.am
+index f68423e..1dc984f 100644
+--- a/monitor/Makefile.am
++++ b/monitor/Makefile.am
+@@ -1,4 +1,4 @@
+-
++DIST_SUBDIRS = proxy hal gdu gphoto2 afc
+ SUBDIRS = proxy
+ 
+ if USE_HAL
+@@ -12,3 +12,7 @@ endif
+ if USE_GPHOTO2
+ SUBDIRS += gphoto2
+ endif
++
++if USE_AFC
++SUBDIRS += afc
++endif
+diff --git a/monitor/afc/Makefile.am b/monitor/afc/Makefile.am
+new file mode 100644
+index 0000000..9b3b17c
+--- /dev/null
++++ b/monitor/afc/Makefile.am
+@@ -0,0 +1,49 @@
++NULL =
++
++gvfs_src_dir = $(top_srcdir)/@with_gvfs_source@
++
++libexec_PROGRAMS = gvfs-afc-volume-monitor
++
++gvfs_afc_volume_monitor_SOURCES = \
++	afcvolume.c		afcvolume.h \
++	afcvolumemonitor.c 	afcvolumemonitor.h \
++	afcvolumemonitordaemon.c \
++	$(NULL)
++
++gvfs_afc_volume_monitor_CFLAGS = \
++	-DG_LOG_DOMAIN=\"GVFS-AFC\" \
++	-I$(top_srcdir)/common \
++	-I$(top_srcdir)/monitor/proxy \
++	$(GLIB_CFLAGS) \
++	$(AFC_CFLAGS) \
++	$(WARN_CFLAGS) \
++	-DGIO_MODULE_DIR=\"$(GIO_MODULE_DIR)\" \
++	-DGVFS_LOCALEDIR=\"$(localedir)\" \
++	-DG_DISABLE_DEPRECATED \
++	$(NULL)
++
++gvfs_afc_volume_monitor_LDADD = \
++	$(GLIB_LIBS) \
++	$(DBUS_LIBS) \
++	$(AFC_LIBS) \
++	$(top_srcdir)/common/libgvfscommon.la \
++	$(top_srcdir)/monitor/proxy/libgvfsproxyvolumemonitordaemon-noin.la \
++	$(NULL)
++
++remote_volume_monitorsdir = $(datadir)/gvfs/remote-volume-monitors
++remote_volume_monitors_DATA = afc.monitor
++
++servicedir = $(datadir)/dbus-1/services
++service_in_files = org.gtk.Private.AfcVolumeMonitor.service.in
++service_DATA = $(service_in_files:.service.in=.service)
++
++$(service_DATA): $(service_in_files) Makefile
++	@sed -e "s|\@libexecdir\@|$(libexecdir)|" $< > $@
++
++clean-local:
++	rm -f *~ *.loT $(BUILT_SOURCES) $(service_DATA)
++
++DISTCLEANFILES = $(service_DATA)
++
++EXTRA_DIST = $(service_in_files) afc.monitor
++
+diff --git a/monitor/afc/afc.monitor b/monitor/afc/afc.monitor
+new file mode 100644
+index 0000000..1663573
+--- /dev/null
++++ b/monitor/afc/afc.monitor
+@@ -0,0 +1,5 @@
++[RemoteVolumeMonitor]
++Name=GProxyVolumeMonitorAfc
++DBusName=org.gtk.Private.AfcVolumeMonitor
++IsNative=false
++
+diff --git a/monitor/afc/afcvolume.c b/monitor/afc/afcvolume.c
+new file mode 100644
+index 0000000..0e3c65e
+--- /dev/null
++++ b/monitor/afc/afcvolume.c
+@@ -0,0 +1,350 @@
++/*
++ * gvfs/monitor/afc/afc-volume.c
++ *
++ * Copyright (c) 2008 Patrick Walton <pcwalton@cs.ucla.edu>
++ */
++
++#include <config.h>
++#include <string.h>
++#include <glib.h>
++#include <gio/gio.h>
++
++#include <libiphone/libiphone.h>
++#include <libiphone/lockdown.h>
++#include <libiphone/afc.h>
++
++#include "afcvolume.h"
++
++#define DEFAULT_SERVICE "com.apple.afc"
++
++struct _GVfsAfcVolume {
++  GObject parent;
++
++  GVolumeMonitor *monitor;
++
++  char *uuid;
++
++  char *name;
++  char *icon;
++  char *icon_fallback;
++};
++
++static void g_vfs_afc_volume_iface_init (GVolumeIface *iface);
++
++G_DEFINE_TYPE_EXTENDED(GVfsAfcVolume, g_vfs_afc_volume, G_TYPE_OBJECT, 0,
++                       G_IMPLEMENT_INTERFACE(G_TYPE_VOLUME, g_vfs_afc_volume_iface_init))
++
++static void
++g_vfs_afc_volume_finalize (GObject *object)
++{
++  GVfsAfcVolume *self;
++
++  self = G_VFS_AFC_VOLUME(object);
++
++  g_free (self->uuid);
++
++  g_free (self->name);
++  g_free (self->icon);
++  g_free (self->icon_fallback);
++
++  if (G_OBJECT_CLASS(g_vfs_afc_volume_parent_class)->finalize)
++    (*G_OBJECT_CLASS(g_vfs_afc_volume_parent_class)->finalize) (G_OBJECT(self));
++}
++
++static void
++g_vfs_afc_volume_init (GVfsAfcVolume *self)
++{
++  GVfsAfcVolume *afc_volume = G_VFS_AFC_VOLUME (self);
++
++  afc_volume->name = g_strdup ("iPhone");
++  afc_volume->icon = g_strdup ("phone-apple-iphone");
++}
++
++static void
++g_vfs_afc_volume_class_init (GVfsAfcVolumeClass *klass)
++{
++  GObjectClass *gobject_class;
++  gobject_class = G_OBJECT_CLASS(klass);
++  gobject_class->finalize = g_vfs_afc_volume_finalize;
++}
++
++static int
++_g_vfs_afc_volume_update_metadata (GVfsAfcVolume *self)
++{
++  iphone_device_t dev;
++  afc_client_t afc_cli;
++  lockdownd_client_t lockdown_cli = NULL;
++  iphone_error_t err;
++  guint retries;
++  char *model, *display_name;
++  int port;
++
++  retries = 0;
++  do {
++      err = iphone_get_device_by_uuid (&dev, self->uuid);
++      if (err == IPHONE_E_SUCCESS)
++        break;
++      g_usleep (G_USEC_PER_SEC);
++  } while (retries++ < 10);
++
++  if (err != IPHONE_E_SUCCESS)
++    return 0;
++
++  if (lockdownd_client_new (dev, &lockdown_cli) != LOCKDOWN_E_SUCCESS)
++    {
++      iphone_device_free (dev);
++      return 0;
++    }
++
++  /* try to use pretty device name */
++  if (lockdownd_get_device_name (lockdown_cli, &display_name) == LOCKDOWN_E_SUCCESS)
++    {
++      g_free (self->name);
++      self->name = display_name;
++    }
++
++  if (lockdownd_start_service (lockdown_cli, DEFAULT_SERVICE, &port) != LOCKDOWN_E_SUCCESS)
++    {
++      lockdownd_client_free (lockdown_cli);
++      iphone_device_free (dev);
++      return 0;
++    }
++
++  if (afc_client_new (dev, port, &afc_cli) == AFC_E_SUCCESS)
++    {
++      /* set correct fd icon spec name depending on device model */
++      model = afc_get_device_info_field (afc_cli, "Model");
++      if (model != NULL)
++        {
++          if(g_str_has_prefix(model, "iPod") != FALSE)
++            {
++              g_free (self->icon);
++              self->icon = g_strdup ("multimedia-player-apple-ipod-touch");
++            }
++          g_free (model);
++        }
++      afc_client_free(afc_cli);
++    }
++
++  lockdownd_client_free (lockdown_cli);
++  iphone_device_free (dev);
++
++  return 1;
++}
++
++GVfsAfcVolume *
++g_vfs_afc_volume_new (GVolumeMonitor *monitor,
++                      const char     *uuid)
++{
++  GVfsAfcVolume *self;
++
++  self = G_VFS_AFC_VOLUME(g_object_new (G_VFS_TYPE_AFC_VOLUME, NULL));
++  self->monitor = monitor;
++  self->uuid = g_strdup (uuid);
++
++  /* Get mount information here */
++  if (!_g_vfs_afc_volume_update_metadata (self))
++      return NULL;
++
++  return self;
++}
++
++static char *
++g_vfs_afc_volume_get_name (GVolume *volume)
++{
++  GVfsAfcVolume *afc_volume = G_VFS_AFC_VOLUME (volume);
++  char *name;
++
++  name = g_strdup (afc_volume->name);
++
++  return name;
++}
++
++static GIcon *
++g_vfs_afc_volume_get_icon (GVolume *volume)
++{
++  GVfsAfcVolume *afc_volume = G_VFS_AFC_VOLUME (volume);
++  GIcon *icon;
++
++  icon = g_themed_icon_new_with_default_fallbacks (afc_volume->icon);
++
++  return icon;
++}
++
++static char *
++g_vfs_afc_volume_get_uuid (GVolume *volume)
++{
++  GVfsAfcVolume *afc_volume = G_VFS_AFC_VOLUME (volume);
++
++  return g_strdup (afc_volume->uuid);
++}
++
++static gboolean
++g_vfs_afc_volume_can_mount (GVolume *volume)
++{
++  return TRUE;
++}
++
++static gboolean
++g_vfs_afc_volume_should_automount (GVolume *volume)
++{
++  return TRUE;
++}
++
++static GDrive *
++g_vfs_afc_volume_get_drive (GVolume *volume)
++{
++  return NULL;
++}
++
++static GMount *
++g_vfs_afc_volume_get_mount (GVolume *volume)
++{
++  return NULL;
++}
++
++typedef struct
++{
++  GVfsAfcVolume *enclosing_volume;
++  GAsyncReadyCallback  callback;
++  GFile *root;
++  gpointer user_data;
++} ActivationMountOp;
++
++static void
++mount_callback (GObject *source_object,
++                GAsyncResult *res,
++                gpointer user_data)
++{
++  ActivationMountOp *data = user_data;
++  data->callback (G_OBJECT (data->enclosing_volume), res, data->user_data);
++  g_object_unref (data->root);
++  g_free (data);
++}
++
++static void
++g_vfs_afc_volume_mount (GVolume             *volume,
++                        GMountMountFlags     flags,
++                        GMountOperation     *mount_operation,
++                        GCancellable        *cancellable,
++                        GAsyncReadyCallback  callback,
++                        gpointer             user_data)
++{
++  GVfsAfcVolume *afc_volume = G_VFS_AFC_VOLUME (volume);
++  ActivationMountOp *data;
++  GFile *root;
++  char *uri;
++
++  g_print ("g_vfs_afc_volume_mount (can_mount=%d uuid=%s)\n",
++           g_vfs_afc_volume_can_mount (volume),
++           afc_volume->uuid);
++
++  uri = g_strdup_printf ("afc://%s", afc_volume->uuid);
++  root = g_file_new_for_uri (uri);
++  g_free (uri);
++
++  data = g_new0 (ActivationMountOp, 1);
++  data->enclosing_volume = afc_volume;
++  data->callback = callback;
++  data->user_data = user_data;
++  data->root = root;
++
++  g_object_set_data_full (G_OBJECT(volume), "root", g_object_ref (root), g_object_unref);
++
++  g_file_mount_enclosing_volume (root,
++                                 0,
++                                 mount_operation,
++                                 cancellable,
++                                 mount_callback,
++                                 data);
++}
++
++static gboolean
++g_vfs_afc_volume_mount_finish (GVolume       *volume,
++                               GAsyncResult  *result,
++                               GError       **error)
++{
++  GFile *root;
++  gboolean res;
++
++  root = g_object_get_data (G_OBJECT (volume), "root");
++  res = g_file_mount_enclosing_volume_finish (root, result, error);
++
++  return res;
++}
++
++static char *
++g_vfs_afc_volume_get_identifier (GVolume              *volume,
++                                 const char          *kind)
++{
++  GVfsAfcVolume *afc_volume = G_VFS_AFC_VOLUME (volume);
++  char *id;
++
++  id = NULL;
++  if (g_str_equal (kind, G_VOLUME_IDENTIFIER_KIND_UUID) != FALSE)
++    id = g_strdup (afc_volume->uuid);
++
++  return id;
++}
++
++static char **
++g_vfs_afc_volume_enumerate_identifiers (GVolume *volume)
++{
++  GVfsAfcVolume *afc_volume = G_VFS_AFC_VOLUME (volume);
++  GPtrArray *res;
++
++  res = g_ptr_array_new ();
++
++  if (afc_volume->uuid && *afc_volume->uuid != 0)
++    {
++        g_ptr_array_add (res,
++                         g_strdup (G_VOLUME_IDENTIFIER_KIND_UUID));
++    }
++
++  /* Null-terminate */
++  g_ptr_array_add (res, NULL);
++
++  return (char **)g_ptr_array_free (res, FALSE);
++}
++
++static GFile *
++g_vfs_afc_volume_get_activation_root (GVolume *volume)
++{
++  GFile *root;
++
++  root = g_object_get_data (G_OBJECT (volume), "root");
++  if (root == NULL)
++    return NULL;
++
++  return g_object_ref (root);
++}
++
++static void
++g_vfs_afc_volume_iface_init (GVolumeIface *iface)
++{
++  iface->get_name = g_vfs_afc_volume_get_name;
++  iface->get_icon = g_vfs_afc_volume_get_icon;
++  iface->get_uuid = g_vfs_afc_volume_get_uuid;
++  iface->get_drive = g_vfs_afc_volume_get_drive;
++  iface->get_mount = g_vfs_afc_volume_get_mount;
++  iface->can_mount = g_vfs_afc_volume_can_mount;
++  iface->should_automount = g_vfs_afc_volume_should_automount;
++  iface->mount_fn = g_vfs_afc_volume_mount;
++  iface->mount_finish = g_vfs_afc_volume_mount_finish;
++  iface->eject = NULL;
++  iface->eject_finish = NULL;
++  iface->get_identifier = g_vfs_afc_volume_get_identifier;
++  iface->enumerate_identifiers = g_vfs_afc_volume_enumerate_identifiers;
++  iface->get_activation_root = g_vfs_afc_volume_get_activation_root;
++}
++
++gboolean g_vfs_afc_volume_has_uuid(GVfsAfcVolume *volume, const char *uuid)
++{
++  GVfsAfcVolume *afc_volume = G_VFS_AFC_VOLUME (volume);
++  g_return_val_if_fail (uuid != NULL, FALSE);
++  return (g_strcmp0 (afc_volume->uuid, uuid) == 0);
++}
++
++/*
++ * vim: sw=2 ts=8 cindent expandtab cinoptions=f0,>4,n2,{2,(0,^-2,t0 ai
++ */
+diff --git a/monitor/afc/afcvolume.h b/monitor/afc/afcvolume.h
+new file mode 100644
+index 0000000..de24cd5
+--- /dev/null
++++ b/monitor/afc/afcvolume.h
+@@ -0,0 +1,44 @@
++/*
++ * gvfs/monitor/afc/afc-volume.h
++ *
++ * Copyright (c) 2008 Patrick Walton <pcwalton@cs.ucla.edu>
++ */
++
++#ifndef GVFS_MONITOR_AFC_AFC_VOLUME_H
++#define GVFS_MONITOR_AFC_AFC_VOLUME_H
++
++#include <glib-object.h>
++#include <gio/gio.h>
++
++#include "afcvolumemonitor.h"
++
++G_BEGIN_DECLS
++
++#define G_VFS_TYPE_AFC_VOLUME   (g_vfs_afc_volume_get_type())
++#define G_VFS_AFC_VOLUME(o) (G_TYPE_CHECK_INSTANCE_CAST((o), G_VFS_TYPE_AFC_VOLUME, GVfsAfcVolume))
++#define G_VFS_AFC_VOLUME_CLASS(k) (G_TYPE_CHECK_CLASS_CAST((k), G_VFS_TYPE_AFC_VOLUME, GVfsAfcVolumeClass))
++#define G_VFS_IS_AFC_VOLUME(o) (G_TYPE_CHECK_INSTANCE_TYPE((o), G_VFS_TYPE_AFC_VOLUME))
++#define G_VFS_IS_AFC_VOLUME_CLASS(k) ((G_TYPE_CHECK_CLASS_TYPE((k), G_VFS_TYPE_AFC_VOLUME))
++#define G_VFS_AFC_VOLUME_GET_CLASS(o) (G_TYPE_INSTANCE_GET_CLASS((o), G_VFS_TYPE_AFC_VOLUME, GVfsAfcVolumeClass))
++
++typedef struct _GVfsAfcVolume GVfsAfcVolume;
++typedef struct _GVfsAfcVolumeClass GVfsAfcVolumeClass;
++
++struct _GVfsAfcVolumeClass {
++  GObjectClass parent_class;
++};
++
++GType g_vfs_afc_volume_get_type (void) G_GNUC_CONST;
++
++GVfsAfcVolume *g_vfs_afc_volume_new (GVolumeMonitor *monitor,
++                                     const char     *uuid);
++
++gboolean g_vfs_afc_volume_has_uuid (GVfsAfcVolume *volume, const char *uuid);
++
++G_END_DECLS
++
++#endif /* GVFS_MONITOR_AFC_AFC_VOLUME_H */
++
++/*
++ * vim: sw=2 ts=8 cindent expandtab cinoptions=f0,>4,n2,{2,(0,^-2,t0 ai
++ */
+diff --git a/monitor/afc/afcvolumemonitor.c b/monitor/afc/afcvolumemonitor.c
+new file mode 100644
+index 0000000..e0de6ef
+--- /dev/null
++++ b/monitor/afc/afcvolumemonitor.c
+@@ -0,0 +1,188 @@
++/*
++ * gvfs/monitor/afc/afc-volume-monitor.c
++ *
++ * Copyright (c) 2008 Patrick Walton <pcwalton@ucla.edu>
++ */
++
++#include <config.h>
++#include <glib.h>
++#include <gmodule.h>
++#include <gvfsproxyvolumemonitordaemon.h>
++#include <stdio.h>
++#include <gio/gio.h>
++#include <usbmuxd.h>
++#include "afcvolume.h"
++#include "afcvolumemonitor.h"
++
++struct _GVfsAfcVolumeMonitor {
++  GNativeVolumeMonitor parent;
++  GList *volumes;
++};
++
++G_DEFINE_TYPE(GVfsAfcVolumeMonitor, g_vfs_afc_volume_monitor, G_TYPE_VOLUME_MONITOR)
++
++static void
++g_vfs_afc_monitor_create_volume (GVfsAfcVolumeMonitor *self,
++                                 const char *uuid)
++{
++  GVfsAfcVolume *volume = NULL;
++
++  g_print ("creating volume for device uuid '%s'\n", uuid);
++
++  volume = g_vfs_afc_volume_new (G_VOLUME_MONITOR (self), uuid);
++  if (volume != NULL)
++    {
++      self->volumes = g_list_prepend (self->volumes, volume);
++      g_signal_emit_by_name (self, "volume-added", volume);
++    }
++}
++
++static GVfsAfcVolume *
++find_volume_by_uuid (GVfsAfcVolumeMonitor *self,
++                     const char * uuid)
++{
++  GList *l;
++
++  for (l = self->volumes; l != NULL; l = l->next)
++    {
++      GVfsAfcVolume *volume = l->data;
++      if (volume && g_vfs_afc_volume_has_uuid (volume, uuid))
++        return volume;
++    }
++
++  return NULL;
++}
++
++static void
++g_vfs_afc_monitor_remove_volume (GVfsAfcVolumeMonitor *self,
++                                 const char *uuid)
++{
++  GVfsAfcVolume *volume = NULL;
++
++  volume = find_volume_by_uuid (self, uuid);
++  if (volume != NULL)
++    {
++      g_print ("removing volume for device uuid '%s'\n", uuid);
++      self->volumes = g_list_remove (self->volumes, volume);
++      g_signal_emit_by_name (self, "volume-removed", volume);
++    }
++}
++
++static void
++g_vfs_afc_monitor_usbmuxd_event (const usbmuxd_event_t *event, void *user_data)
++{
++  GVfsAfcVolumeMonitor *self;
++
++  g_return_if_fail (event != NULL);
++
++  self = G_VFS_AFC_VOLUME_MONITOR(user_data);
++
++  if (event->event == UE_DEVICE_ADD)
++    g_vfs_afc_monitor_create_volume (self, event->device.uuid);
++  else
++    g_vfs_afc_monitor_remove_volume (self, event->device.uuid);
++}
++
++static GObject *
++g_vfs_afc_volume_monitor_constructor (GType type, guint ncps,
++                                      GObjectConstructParam *cps)
++{
++  GVfsAfcVolumeMonitor *self;
++
++  /* Boilerplate code to chain from parent. */
++  self = G_VFS_AFC_VOLUME_MONITOR((*G_OBJECT_CLASS(g_vfs_afc_volume_monitor_parent_class)->constructor)(type, ncps, cps));
++
++  self->volumes = NULL;
++
++  usbmuxd_subscribe(g_vfs_afc_monitor_usbmuxd_event, self);
++
++  g_print ("Volume monitor alive\n");
++
++  return G_OBJECT(self);
++}
++
++static void
++list_free (GList *objects)
++{
++  g_list_foreach (objects, (GFunc)g_object_unref, NULL);
++  g_list_free (objects);
++}
++
++static void
++g_vfs_afc_volume_monitor_finalize (GObject *_self)
++{
++  GVfsAfcVolumeMonitor *self;
++
++  self = G_VFS_AFC_VOLUME_MONITOR(_self);
++
++  usbmuxd_unsubscribe();
++
++  if (self->volumes)
++    list_free (self->volumes);
++
++  if (G_OBJECT_CLASS(g_vfs_afc_volume_monitor_parent_class)->finalize)
++    (*G_OBJECT_CLASS(g_vfs_afc_volume_monitor_parent_class)->finalize)( G_OBJECT(self));
++}
++
++static GList *
++g_vfs_afc_volume_monitor_get_mounts (GVolumeMonitor *_self)
++{
++  return NULL;
++}
++
++static GList *
++g_vfs_afc_volume_monitor_get_volumes (GVolumeMonitor *_self)
++{
++  GVfsAfcVolumeMonitor *self;
++  GList *l;
++
++  self = G_VFS_AFC_VOLUME_MONITOR (_self);
++
++  l = g_list_copy (self->volumes);
++  g_list_foreach (l, (GFunc)g_object_ref, NULL);
++
++  return l;
++}
++
++static GList *
++g_vfs_afc_volume_monitor_get_connected_drives (GVolumeMonitor *_self)
++{
++  return NULL;
++}
++
++static gboolean
++g_vfs_afc_volume_monitor_is_supported (void)
++{
++  return TRUE;
++}
++
++static void
++g_vfs_afc_volume_monitor_class_init (GVfsAfcVolumeMonitorClass * klass)
++{
++  GObjectClass *gobject_class = G_OBJECT_CLASS(klass);
++  GVolumeMonitorClass *monitor_class = G_VOLUME_MONITOR_CLASS(klass);
++
++  gobject_class->constructor = g_vfs_afc_volume_monitor_constructor;
++  gobject_class->finalize = g_vfs_afc_volume_monitor_finalize;
++
++  monitor_class->get_mounts = g_vfs_afc_volume_monitor_get_mounts;
++  monitor_class->get_volumes = g_vfs_afc_volume_monitor_get_volumes;
++  monitor_class->get_connected_drives = g_vfs_afc_volume_monitor_get_connected_drives;
++  monitor_class->is_supported = g_vfs_afc_volume_monitor_is_supported;
++}
++
++static void
++g_vfs_afc_volume_monitor_init(GVfsAfcVolumeMonitor *self)
++{
++}
++
++GVolumeMonitor *
++g_vfs_afc_volume_monitor_new (void)
++{
++  return G_VOLUME_MONITOR(g_object_new (G_VFS_TYPE_AFC_VOLUME_MONITOR,
++                                        NULL));
++}
++
++/*
++ * vim: sw=2 ts=8 cindent expandtab cinoptions=f0,>4,n2,{2,(0,^-2,t0 ai
++ */
+diff --git a/monitor/afc/afcvolumemonitor.h b/monitor/afc/afcvolumemonitor.h
+new file mode 100644
+index 0000000..0bd5f32
+--- /dev/null
++++ b/monitor/afc/afcvolumemonitor.h
+@@ -0,0 +1,39 @@
++/*
++ * gvfs/monitor/afc/afc-volume-monitor.h
++ *
++ * Copyright (c) 2008 Patrick Walton <pcwalton@ucla.edu>
++ */
++
++#ifndef AFC_VOLUME_MONITOR_H
++#define AFC_VOLUME_MONITOR_H
++
++#include <glib-object.h>
++#include <gio/gio.h>
++
++G_BEGIN_DECLS
++
++#define G_VFS_TYPE_AFC_VOLUME_MONITOR   (g_vfs_afc_volume_monitor_get_type())
++#define G_VFS_AFC_VOLUME_MONITOR(o) (G_TYPE_CHECK_INSTANCE_CAST((o), G_VFS_TYPE_AFC_VOLUME_MONITOR, GVfsAfcVolumeMonitor))
++#define G_VFS_AFC_VOLUME_MONITOR_CLASS(k) (G_TYPE_CHECK_CLASS_CAST((k), G_VFS_TYPE_AFC_VOLUME_MONITOR, GVfsAfcVolumeMonitorClass))
++#define G_VFS_IS_AFC_VOLUME_MONITOR(o) (G_TYPE_CHECK_INSTANCE_TYPE((o), G_VFS_TYPE_AFC_VOLUME_MONITOR))
++#define G_VFS_IS_AFC_VOLUME_MONITOR_CLASS(k) (G_TYPE_CHECK_CLASS_TYPE((k), G_VFS_TYPE_AFC_VOLUME_MONITOR))
++#define G_VFS_AFC_VOLUME_MONITOR_GET_CLASS(o) (G_TYPE_INSTANCE_GET_CLASS((o), G_VFS_TYPE_AFC_VOLUME_MONITOR, GVfsAfcVolumeMonitorClass))
++
++typedef struct _GVfsAfcVolumeMonitor GVfsAfcVolumeMonitor;
++typedef struct _GVfsAfcVolumeMonitorClass GVfsAfcVolumeMonitorClass;
++
++struct _GVfsAfcVolumeMonitorClass {
++  GVolumeMonitorClass parent_class;
++};
++
++GType g_vfs_afc_volume_monitor_get_type (void) G_GNUC_CONST;
++
++GVolumeMonitor *g_vfs_afc_volume_monitor_new (void);
++
++G_END_DECLS
++
++#endif /* AFC_VOLUME_MONITOR_H */
++
++/*
++ * vim: sw=2 ts=8 cindent expandtab cinoptions=f0,>4,n2,{2,(0,^-2,t0 ai
++ */
+diff --git a/monitor/afc/afcvolumemonitordaemon.c b/monitor/afc/afcvolumemonitordaemon.c
+new file mode 100644
+index 0000000..9c24a34
+--- /dev/null
++++ b/monitor/afc/afcvolumemonitordaemon.c
+@@ -0,0 +1,31 @@
++/*
++ * gvfs/monitor/afc/afc-volume-monitor-daemon.c
++ *
++ * Copyright (c) 2008-2009 Patrick Walton <pcwalton@ucla.edu>
++ * Copyright (c) 2009 Martin Szulecki <opensuse@sukimashita.com>
++ */
++
++#include <config.h>
++
++#include <glib.h>
++#include <glib/gi18n-lib.h>
++#include <gmodule.h>
++#include <gio/gio.h>
++
++#include <gvfsproxyvolumemonitordaemon.h>
++
++#include "afcvolumemonitor.h"
++
++int
++main (int argc, char *argv[])
++{
++  g_vfs_proxy_volume_monitor_daemon_init ();
++  return g_vfs_proxy_volume_monitor_daemon_main (argc,
++                                                 argv,
++                                                 "org.gtk.Private.AfcVolumeMonitor",
++                                                 G_VFS_TYPE_AFC_VOLUME_MONITOR);
++}
++
++/*
++ * vim: sw=2 ts=8 cindent expandtab cinoptions=f0,>4,n2,{2,(0,^-2,t0 ai
++ */
+diff --git a/monitor/afc/org.gtk.Private.AfcVolumeMonitor.service.in b/monitor/afc/org.gtk.Private.AfcVolumeMonitor.service.in
+new file mode 100644
+index 0000000..4e6bd33
+--- /dev/null
++++ b/monitor/afc/org.gtk.Private.AfcVolumeMonitor.service.in
+@@ -0,0 +1,4 @@
++[D-BUS Service]
++Name=org.gtk.Private.AfcVolumeMonitor
++Exec=@libexecdir@/gvfs-afc-volume-monitor
++
+-- 
+1.6.6.1
+
